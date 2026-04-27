@@ -3678,6 +3678,18 @@ async function buildEditableLayer() {
   const scale = state.baseScale * state.zoom;
   const viewport = page.getViewport({ scale, rotation: pageInfo.rotation });
 
+  // Create a "whiteout" layer underneath - covers the original text positions
+  // so when blocks are moved, nothing remains behind
+  const whiteout = document.createElement('div');
+  whiteout.className = 'editable-whiteout-layer';
+  whiteout.style.position = 'absolute';
+  whiteout.style.top = '0';
+  whiteout.style.left = '0';
+  whiteout.style.width = '100%';
+  whiteout.style.height = '100%';
+  whiteout.style.pointerEvents = 'none';
+  editTextLayer.appendChild(whiteout);
+
   // ==== TEXT BLOCKS ====
   const textContent = state.textContent[pageInfo.key] || await page.getTextContent();
   state.textContent[pageInfo.key] = textContent;
@@ -3697,16 +3709,33 @@ async function buildEditableLayer() {
     const width = item.width * scale;
 
     const saved = pageEdits[idx] || {};
+
+    // ALWAYS add whiteout rectangle at original position - covers the original text
+    // (small extra padding to fully cover descenders/ascenders/anti-aliasing)
+    const padX = fontHeight * 0.08;
+    const padY = fontHeight * 0.12;
+    const wo = document.createElement('div');
+    wo.style.position = 'absolute';
+    wo.style.left = (left - padX) + 'px';
+    wo.style.top = (top - padY) + 'px';
+    wo.style.width = (width + padX * 2) + 'px';
+    wo.style.height = (fontHeight * 1.1 + padY * 2) + 'px';
+    wo.style.background = '#ffffff';
+    if (angle) {
+      wo.style.transform = `rotate(${angle}rad)`;
+      wo.style.transformOrigin = (padX) + 'px ' + (padY + ascent) + 'px';
+    }
+    whiteout.appendChild(wo);
+
     if (saved.deleted) return; // skip deleted blocks
 
-    // Create a wrapper for movable + editable block
+    // Editable block
     const block = document.createElement('div');
     block.className = 'editable-block';
     block.dataset.itemIdx = idx;
     block.dataset.pageKey = pageInfo.key;
     block.dataset.blockType = 'text';
 
-    // Position (with optional offset from saved drag)
     const finalLeft = saved.posX != null ? saved.posX : left;
     const finalTop = saved.posY != null ? saved.posY : top;
     const finalWidth = saved.width != null ? saved.width : Math.max(width, 30);
@@ -3727,10 +3756,9 @@ async function buildEditableLayer() {
       block.style.transform = `rotate(${angle}rad)`;
     }
 
-    // Inner text content
     const inner = document.createElement('div');
     inner.className = 'editable-block-inner';
-    inner.contentEditable = 'false'; // Default not editable - user must double-click
+    inner.contentEditable = 'false';
     inner.spellcheck = false;
     inner.textContent = saved.newText != null ? saved.newText : item.str;
     block.appendChild(inner);
@@ -3739,7 +3767,6 @@ async function buildEditableLayer() {
       block.classList.add('modified');
     }
 
-    // Store original metadata
     block.dataset.origStr = item.str;
     block.dataset.origLeftPx = left;
     block.dataset.origTopPx = top;
@@ -3748,9 +3775,8 @@ async function buildEditableLayer() {
     block.dataset.origAngle = angle;
     block.dataset.fontName = item.fontName || '';
 
-    // Click = select; Double-click = enter text edit mode
     block.addEventListener('mousedown', e => {
-      if (inner.contentEditable === 'true') return;  // already editing
+      if (inner.contentEditable === 'true') return;
       e.stopPropagation();
       selectEditableBlock(block);
       startBlockDrag(e, block);
@@ -3778,8 +3804,8 @@ async function buildEditableLayer() {
     editTextLayer.appendChild(block);
   });
 
-  // ==== IMAGE BLOCKS (extracted from PDF) ====
-  await extractAndBuildImageBlocks(pageInfo, page, viewport);
+  // ==== IMAGE BLOCKS ====
+  await extractAndBuildImageBlocks(pageInfo, page, viewport, whiteout);
 
   if (textContent.items.length === 0 && (!state.pageImages[pageInfo.key] || state.pageImages[pageInfo.key].length === 0)) {
     showToast('Nenhum texto detectado. Use o OCR ou adicione conteúdo manualmente.');
@@ -4010,10 +4036,9 @@ function saveEditableBlockText(block) {
 // =====================================================
 // IMAGE EXTRACTION FROM PDF
 // =====================================================
-async function extractAndBuildImageBlocks(pageInfo, page, viewport) {
+async function extractAndBuildImageBlocks(pageInfo, page, viewport, whiteout) {
   const cacheKey = pageInfo.key;
 
-  // Try to extract images on first visit
   if (!state.pageImages[cacheKey]) {
     state.pageImages[cacheKey] = await extractPageImages(page, viewport);
   }
@@ -4024,8 +4049,28 @@ async function extractAndBuildImageBlocks(pageInfo, page, viewport) {
   if (!state.imageEdits[cacheKey]) state.imageEdits[cacheKey] = {};
   const edits = state.imageEdits[cacheKey];
 
+  const scaleRatio = (state.baseScale * state.zoom) / (images[0]?.captureScale || 1);
+
   images.forEach(img => {
     const editInfo = edits[img.id] || {};
+
+    // Always cover the ORIGINAL position with the cropped image as whiteout
+    // — but only if the image was moved or deleted (otherwise leave canvas alone)
+    const wasMoved = editInfo.posX != null || editInfo.posY != null;
+    const wasResized = editInfo.width != null || editInfo.height != null;
+    const wasDeleted = editInfo.deleted;
+
+    if (wasMoved || wasResized || wasDeleted) {
+      const wo = document.createElement('div');
+      wo.style.position = 'absolute';
+      wo.style.left = (img.x * scaleRatio) + 'px';
+      wo.style.top = (img.y * scaleRatio) + 'px';
+      wo.style.width = (img.width * scaleRatio) + 'px';
+      wo.style.height = (img.height * scaleRatio) + 'px';
+      wo.style.background = '#ffffff';
+      whiteout.appendChild(wo);
+    }
+
     if (editInfo.deleted) return;
 
     const block = document.createElement('div');
@@ -4034,8 +4079,6 @@ async function extractAndBuildImageBlocks(pageInfo, page, viewport) {
     block.dataset.pageKey = pageInfo.key;
     block.dataset.blockType = 'image';
 
-    // Position - scale based on current viewport scale
-    const scaleRatio = (state.baseScale * state.zoom) / img.captureScale;
     const x = editInfo.posX != null ? editInfo.posX : img.x * scaleRatio;
     const y = editInfo.posY != null ? editInfo.posY : img.y * scaleRatio;
     const w = editInfo.width != null ? editInfo.width : img.width * scaleRatio;
@@ -4046,7 +4089,6 @@ async function extractAndBuildImageBlocks(pageInfo, page, viewport) {
     block.style.width = w + 'px';
     block.style.height = h + 'px';
 
-    // Show the image in the box
     const imgEl = document.createElement('img');
     imgEl.src = img.dataUrl;
     imgEl.draggable = false;
@@ -4074,11 +4116,6 @@ async function extractAndBuildImageBlocks(pageInfo, page, viewport) {
 async function extractPageImages(page, viewport) {
   // Use PDF.js operator list to find image positions and the rendered canvas to crop them
   try {
-    const opList = await page.getOperatorList();
-    const fnArray = opList.fnArray;
-    const argsArray = opList.argsArray;
-    const OPS = pdfjsLib.OPS;
-
     const captureScale = viewport.scale;
     const captureViewport = page.getViewport({ scale: captureScale, rotation: viewport.rotation });
 
@@ -4089,10 +4126,9 @@ async function extractPageImages(page, viewport) {
     const offCtx = offCanvas.getContext('2d');
     await page.render({ canvasContext: offCtx, viewport: captureViewport }).promise;
 
+    const OPS = pdfjsLib.OPS;
     const images = [];
     let nextImgId = 1;
-    const ctmStack = [];
-    let ctm = [1, 0, 0, 1, 0, 0];
 
     function multiply(a, b) {
       return [
@@ -4105,9 +4141,8 @@ async function extractPageImages(page, viewport) {
       ];
     }
 
-    // Helper to record an image at the current CTM
-    function recordImageAtCtm() {
-      const final = multiply(captureViewport.transform, ctm);
+    function recordImageAtCtm(currentCtm) {
+      const final = multiply(captureViewport.transform, currentCtm);
       const x0 = final[4];
       const y0 = final[5];
       const x1 = final[0] + final[2] + final[4];
@@ -4120,11 +4155,8 @@ async function extractPageImages(page, viewport) {
       const w = right - left;
       const h = bottom - top;
 
-      // Be more permissive: allow smaller images (logos, signatures often small)
-      // and tolerate some out-of-bounds (clipping)
-      const minSize = 4; // px
+      const minSize = 4;
       if (w > minSize && h > minSize) {
-        // Clip to canvas bounds
         const clipL = Math.max(0, Math.round(left));
         const clipT = Math.max(0, Math.round(top));
         const clipR = Math.min(captureViewport.width, Math.round(right));
@@ -4144,7 +4176,7 @@ async function extractPageImages(page, viewport) {
             );
             const dataUrl = cropCanvas.toDataURL('image/png');
             images.push({
-              id: 'img_' + nextImgId++,
+              id: 'img_' + (nextImgId++),
               x: clipL,
               y: clipT,
               width: clipW,
@@ -4159,27 +4191,52 @@ async function extractPageImages(page, viewport) {
       }
     }
 
-    for (let i = 0; i < fnArray.length; i++) {
-      const fn = fnArray[i];
-      const args = argsArray[i];
+    // Recursively walk operator list, descending into Form XObjects (paintFormXObjectBegin/End)
+    // and also into XObjects via beginGroup/endGroup
+    async function walkOpList(opList, ctm) {
+      const fnArray = opList.fnArray;
+      const argsArray = opList.argsArray;
+      const ctmStack = [];
+      let localCtm = [...ctm];
 
-      if (fn === OPS.save) {
-        ctmStack.push([...ctm]);
-      } else if (fn === OPS.restore) {
-        ctm = ctmStack.pop() || [1, 0, 0, 1, 0, 0];
-      } else if (fn === OPS.transform) {
-        ctm = multiply(ctm, args);
-      } else if (
-        fn === OPS.paintImageXObject ||
-        fn === OPS.paintInlineImageXObject ||
-        fn === OPS.paintImageMaskXObject ||
-        fn === OPS.paintJpegXObject ||
-        fn === OPS.paintImageXObjectRepeat ||
-        fn === OPS.paintImageMaskXObjectGroup ||
-        fn === OPS.paintImageMaskXObjectRepeat
-      ) {
-        recordImageAtCtm();
+      for (let i = 0; i < fnArray.length; i++) {
+        const fn = fnArray[i];
+        const args = argsArray[i];
+
+        if (fn === OPS.save) {
+          ctmStack.push([...localCtm]);
+        } else if (fn === OPS.restore) {
+          localCtm = ctmStack.pop() || [1, 0, 0, 1, 0, 0];
+        } else if (fn === OPS.transform) {
+          localCtm = multiply(localCtm, args);
+        } else if (
+          fn === OPS.paintImageXObject ||
+          fn === OPS.paintInlineImageXObject ||
+          fn === OPS.paintImageMaskXObject ||
+          fn === OPS.paintJpegXObject ||
+          fn === OPS.paintImageXObjectRepeat ||
+          fn === OPS.paintImageMaskXObjectGroup ||
+          fn === OPS.paintImageMaskXObjectRepeat
+        ) {
+          recordImageAtCtm(localCtm);
+        }
+        // Note: Form XObjects (group content) may have their own image operators
+        // but PDF.js typically inlines them in the main op list. If we miss some
+        // (paintFormXObjectBegin / paintFormXObjectEnd), the fallback below
+        // (whole-page fallback scanner) will catch them.
       }
+    }
+
+    const opList = await page.getOperatorList();
+    await walkOpList(opList, [1, 0, 0, 1, 0, 0]);
+
+    // FALLBACK: if no images detected via op list (some PDFs hide everything in
+    // form XObjects or vector graphics), use a simple visual heuristic:
+    // scan the rendered canvas for "non-white rectangular regions" that look
+    // like images. This catches logos, signatures, and stamps in tricky PDFs.
+    if (images.length === 0) {
+      const fallback = await detectImagesByCanvasScan(offCanvas, captureScale);
+      images.push(...fallback);
     }
 
     return dedupeImages(images);
@@ -4187,6 +4244,118 @@ async function extractPageImages(page, viewport) {
     console.warn('Image extraction failed:', err);
     return [];
   }
+}
+
+// Fallback: scan rendered page for "image-like" colorful blobs
+// (text appears as thin strokes; images have dense colored fills)
+async function detectImagesByCanvasScan(canvas, captureScale) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // Downsample for speed
+  const DS = 4; // sample every 4 pixels
+  const sw = Math.ceil(W / DS);
+  const sh = Math.ceil(H / DS);
+  const sample = ctx.getImageData(0, 0, W, H);
+  const data = sample.data;
+
+  // Build a grid: 1 if pixel is "colorful" (not near white, not pure black thin strokes)
+  // We mark a pixel as "image-like" if it has color variation in its neighborhood
+  const grid = new Uint8Array(sw * sh);
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const px = x * DS;
+      const py = y * DS;
+      const i = (py * W + px) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      // White-ish?
+      if (r > 240 && g > 240 && b > 240) continue;
+      // Has color (not pure grayscale text)?
+      const maxC = Math.max(r, g, b);
+      const minC = Math.min(r, g, b);
+      const colorful = (maxC - minC) > 25;
+      // OR is a solid dark fill (not just a thin stroke)
+      const dark = maxC < 80;
+      if (colorful || dark) {
+        grid[y * sw + x] = 1;
+      }
+    }
+  }
+
+  // Connected component labeling
+  const labels = new Int32Array(sw * sh);
+  const components = []; // each: {minX, minY, maxX, maxY, count}
+  let nextLabel = 1;
+
+  function flood(sx, sy, label) {
+    const stack = [[sx, sy]];
+    let minX = sx, minY = sy, maxX = sx, maxY = sy, count = 0;
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      if (x < 0 || y < 0 || x >= sw || y >= sh) continue;
+      const idx = y * sw + x;
+      if (grid[idx] !== 1 || labels[idx] !== 0) continue;
+      labels[idx] = label;
+      count++;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+      // Diagonal too (helps merge)
+      stack.push([x + 1, y + 1], [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1]);
+    }
+    return { minX, minY, maxX, maxY, count };
+  }
+
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      if (grid[y * sw + x] === 1 && labels[y * sw + x] === 0) {
+        const c = flood(x, y, nextLabel++);
+        components.push(c);
+      }
+    }
+  }
+
+  // Filter components: must be large enough to be a logo/signature/stamp
+  const minArea = 800; // sample units squared
+  const minDim = 30;   // pixels (after upscale)
+  const goodComponents = components.filter(c => {
+    const w = (c.maxX - c.minX) * DS;
+    const h = (c.maxY - c.minY) * DS;
+    return c.count > minArea / (DS * DS) && w > minDim && h > minDim;
+  });
+
+  // Convert to image records
+  const result = [];
+  let nextId = 1;
+  for (const c of goodComponents) {
+    const padPx = 4;
+    const x = Math.max(0, c.minX * DS - padPx);
+    const y = Math.max(0, c.minY * DS - padPx);
+    const w = Math.min(W - x, (c.maxX - c.minX + 1) * DS + padPx * 2);
+    const h = Math.min(H - y, (c.maxY - c.minY + 1) * DS + padPx * 2);
+
+    if (w < minDim || h < minDim) continue;
+
+    try {
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = w;
+      cropCanvas.height = h;
+      const cropCtx = cropCanvas.getContext('2d');
+      cropCtx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+      const dataUrl = cropCanvas.toDataURL('image/png');
+      result.push({
+        id: 'fallback_img_' + (nextId++),
+        x, y, width: w, height: h, dataUrl, captureScale,
+      });
+    } catch (err) {
+      console.warn('Fallback crop failed:', err);
+    }
+  }
+
+  return result;
 }
 
 function dedupeImages(images) {
