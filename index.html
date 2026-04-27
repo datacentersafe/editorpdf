@@ -60,16 +60,19 @@
 
   .app {
     display: grid;
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows: auto auto auto 1fr;
     grid-template-columns: 290px 1fr 320px;
     grid-template-areas:
       "header header header"
       "toolbar toolbar toolbar"
+      "banner banner banner"
       "sidebar canvas inspector";
     height: 100vh;
     position: relative;
     z-index: 1;
   }
+
+  .edit-mode-banner { grid-area: banner; }
 
   /* HEADER */
   header {
@@ -211,6 +214,159 @@
     color: var(--paper);
   }
   .tool svg { width: 18px; height: 18px; }
+
+  /* Wide tool button - prominent edit mode toggle */
+  .tool.tool-wide {
+    width: auto;
+    padding: 0 14px 0 10px;
+    gap: 8px;
+    background: var(--accent);
+    color: var(--paper);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    border-radius: 2px;
+  }
+  .tool.tool-wide:hover {
+    background: var(--accent-deep);
+    color: var(--paper);
+  }
+  .tool.tool-wide.active {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .tool.tool-wide .tool-text-label {
+    text-transform: uppercase;
+    font-family: 'Inter Tight', sans-serif;
+  }
+  .tool:not(.tool-wide) .tool-text-label { display: none; }
+
+  /* Edit mode banner */
+  .edit-mode-banner {
+    grid-column: 1 / -1;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 10px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    border-bottom: 1px solid var(--ink);
+    animation: bannerSlide 0.3s ease;
+  }
+  .edit-mode-banner.hidden { display: none; }
+
+  @keyframes bannerSlide {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .edit-mode-banner-text {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .edit-mode-banner-text strong {
+    color: var(--accent);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 11px;
+  }
+
+  .edit-mode-banner-text span {
+    color: var(--paper-dark);
+  }
+
+  .edit-mode-pulse {
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.3); }
+  }
+
+  .edit-mode-exit {
+    background: var(--paper);
+    color: var(--ink);
+    border: none;
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    border-radius: 2px;
+    font-family: inherit;
+  }
+  .edit-mode-exit:hover {
+    background: var(--paper-dark);
+  }
+
+  /* Editable text blocks (overlay over original PDF text) */
+  .editable-block {
+    position: absolute;
+    background: rgba(255, 255, 220, 0.5);
+    border: 1px dashed rgba(200, 85, 61, 0.4);
+    color: var(--ink);
+    cursor: text;
+    outline: none;
+    white-space: pre;
+    overflow: visible;
+    transform-origin: 0 0;
+    padding: 0;
+    box-sizing: content-box;
+    transition: background 0.15s, border-color 0.15s;
+    line-height: 1;
+  }
+  .editable-block:hover {
+    background: rgba(255, 240, 180, 0.7);
+    border-color: var(--accent);
+  }
+  .editable-block:focus {
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid var(--accent);
+    box-shadow: 0 0 0 2px rgba(200, 85, 61, 0.2);
+    z-index: 10;
+  }
+  .editable-block.modified {
+    background: rgba(74, 124, 89, 0.12);
+    border-color: var(--green);
+  }
+  .editable-block.modified:focus {
+    background: rgba(255, 255, 255, 0.98);
+    border-color: var(--green);
+    box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.2);
+  }
+
+  /* Layer that holds editable text blocks - shown only in edit mode */
+  .edit-text-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: auto;
+    display: none;
+  }
+  .canvas-wrapper.edit-mode .edit-text-layer {
+    display: block;
+  }
+  .canvas-wrapper.edit-mode .text-layer {
+    display: none;
+  }
+  .canvas-wrapper.edit-mode .overlay-layer {
+    pointer-events: none;
+  }
+  .canvas-wrapper.edit-mode .overlay-layer > * {
+    pointer-events: none;
+  }
 
   .tool-label {
     position: absolute;
@@ -1396,18 +1552,20 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-7 2-2 7z"/></svg>
         <span class="tool-label">Selecionar</span>
       </button>
-      <button class="tool" data-tool="textselect" title="Selecionar texto">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 7V4h16v3M9 20h6M12 4v16"/>
-        </svg>
-        <span class="tool-label">Sel. Texto</span>
-      </button>
     </div>
 
     <div class="tool-group">
-      <button class="tool" data-tool="text" title="Adicionar texto">
+      <button class="tool tool-wide" id="editTextBtn" title="Modo edição de texto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+        <span class="tool-text-label">Editar Texto</span>
+        <span class="tool-label">Modo edição</span>
+      </button>
+      <button class="tool" data-tool="text" title="Adicionar caixa de texto">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M9 6v14M15 6v14"/></svg>
-        <span class="tool-label">Texto</span>
+        <span class="tool-label">Nova caixa</span>
       </button>
       <button class="tool" data-tool="image" title="Adicionar imagem">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1484,6 +1642,15 @@
     </div>
   </div>
 
+  <div class="edit-mode-banner hidden" id="editModeBanner">
+    <div class="edit-mode-banner-text">
+      <span class="edit-mode-pulse"></span>
+      <strong>Modo edição</strong>
+      <span>Clique em qualquer texto para editar · Cole imagens com Ctrl+V</span>
+    </div>
+    <button class="edit-mode-exit" id="editModeExit">Sair do modo edição</button>
+  </div>
+
   <aside class="sidebar">
     <div class="panel-title">
       <span>Páginas</span>
@@ -1497,6 +1664,7 @@
     <div class="canvas-wrapper" id="canvasWrapper">
       <canvas id="pdfCanvas"></canvas>
       <div class="text-layer" id="textLayer"></div>
+      <div class="edit-text-layer" id="editTextLayer"></div>
       <div class="overlay-layer" id="overlayLayer"></div>
     </div>
   </main>
@@ -3360,9 +3528,407 @@ document.addEventListener('keydown', e => {
     deleteElement(state.selectedElement);
   }
   if (e.key === 'Escape') {
-    deselectAll();
+    if (state.editMode) {
+      exitEditMode();
+    } else {
+      deselectAll();
+    }
   }
 });
+
+// =====================================================
+// EDIT TEXT MODE - "Word-style" inline editing
+// =====================================================
+state.editMode = false;
+state.textEdits = {};  // { pageKey: { itemIdx: { newText, originalText, ...layout } } }
+const editTextLayer = $('editTextLayer');
+const editModeBanner = $('editModeBanner');
+
+$('editTextBtn').addEventListener('click', () => {
+  if (state.editMode) exitEditMode();
+  else enterEditMode();
+});
+
+$('editModeExit').addEventListener('click', exitEditMode);
+
+async function enterEditMode() {
+  if (!state.pdfDoc) return;
+  state.editMode = true;
+  $('editTextBtn').classList.add('active');
+  editModeBanner.classList.remove('hidden');
+  canvasWrapper.classList.add('edit-mode');
+  setTool('select');
+  await buildEditableTextLayer();
+  showToast('Modo edição ativado · Clique em qualquer texto para editar', 'success');
+}
+
+function exitEditMode() {
+  state.editMode = false;
+  $('editTextBtn').classList.remove('active');
+  editModeBanner.classList.add('hidden');
+  canvasWrapper.classList.remove('edit-mode');
+  // Save any pending edits from focused element
+  const focused = document.activeElement;
+  if (focused && focused.classList.contains('editable-block')) {
+    saveEditableBlock(focused);
+    focused.blur();
+  }
+  editTextLayer.innerHTML = '';
+  showToast('Modo edição encerrado');
+}
+
+async function buildEditableTextLayer() {
+  editTextLayer.innerHTML = '';
+  if (!state.pdfDoc) return;
+
+  const pageInfo = state.pageOrder[state.currentPage - 1];
+  if (!pageInfo) return;
+
+  const page = await state.pdfDoc.getPage(pageInfo.origIndex + 1);
+  const scale = state.baseScale * state.zoom;
+  const viewport = page.getViewport({ scale, rotation: pageInfo.rotation });
+
+  const textContent = state.textContent[pageInfo.key] || await page.getTextContent();
+  state.textContent[pageInfo.key] = textContent;
+
+  if (!state.textEdits[pageInfo.key]) state.textEdits[pageInfo.key] = {};
+  const pageEdits = state.textEdits[pageInfo.key];
+
+  // For each text item from PDF.js, create an editable contenteditable span
+  textContent.items.forEach((item, idx) => {
+    if (!item.str || !item.str.trim()) return;
+
+    // Compute final transform on the page
+    const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+    const fontHeight = Math.hypot(tx[2], tx[3]);
+    const angle = Math.atan2(tx[1], tx[0]);
+
+    // pdf.js gives left/baseline at tx[4],tx[5]. We want top-left of bbox.
+    const left = tx[4];
+    const top = tx[5] - fontHeight;
+    const width = item.width * scale;
+
+    const block = document.createElement('div');
+    block.className = 'editable-block';
+    block.contentEditable = 'true';
+    block.spellcheck = false;
+    block.dataset.itemIdx = idx;
+    block.dataset.pageKey = pageInfo.key;
+
+    // Use saved text if exists
+    const saved = pageEdits[idx];
+    block.textContent = saved ? saved.newText : item.str;
+    if (saved && saved.newText !== item.str) {
+      block.classList.add('modified');
+    }
+
+    block.style.left = left + 'px';
+    block.style.top = top + 'px';
+    block.style.fontSize = fontHeight + 'px';
+    block.style.minWidth = width + 'px';
+    block.style.fontFamily = mapFontName(item.fontName);
+
+    if (angle) {
+      block.style.transform = `rotate(${angle}rad)`;
+    }
+
+    // Store original layout for export
+    block.dataset.origStr = item.str;
+    block.dataset.origLeftPx = left;
+    block.dataset.origTopPx = top;
+    block.dataset.origFontPx = fontHeight;
+    block.dataset.origAngle = angle;
+    block.dataset.fontName = item.fontName || '';
+
+    block.addEventListener('focus', () => {
+      // Select all on first click
+      requestAnimationFrame(() => {
+        const range = document.createRange();
+        range.selectNodeContents(block);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      });
+    });
+
+    block.addEventListener('blur', () => saveEditableBlock(block));
+
+    block.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        block.blur();
+      }
+    });
+
+    editTextLayer.appendChild(block);
+  });
+
+  if (textContent.items.length === 0) {
+    showToast('Nenhum texto detectado nesta página. Use o OCR para documentos escaneados.');
+  }
+}
+
+function saveEditableBlock(block) {
+  const pageKey = block.dataset.pageKey;
+  const idx = parseInt(block.dataset.itemIdx);
+  const newText = block.textContent;
+  const origStr = block.dataset.origStr;
+
+  if (!state.textEdits[pageKey]) state.textEdits[pageKey] = {};
+
+  if (newText === origStr) {
+    // Reverted to original - clear the edit
+    delete state.textEdits[pageKey][idx];
+    block.classList.remove('modified');
+  } else {
+    state.textEdits[pageKey][idx] = {
+      itemIdx: idx,
+      originalText: origStr,
+      newText: newText,
+      leftPx: parseFloat(block.dataset.origLeftPx),
+      topPx: parseFloat(block.dataset.origTopPx),
+      fontPx: parseFloat(block.dataset.origFontPx),
+      angle: parseFloat(block.dataset.origAngle),
+      fontName: block.dataset.fontName,
+    };
+    block.classList.add('modified');
+  }
+}
+
+function mapFontName(fontName) {
+  if (!fontName) return 'sans-serif';
+  const lower = fontName.toLowerCase();
+  if (lower.includes('times') || lower.includes('serif') || lower.includes('roman')) {
+    return 'Georgia, "Times New Roman", serif';
+  }
+  if (lower.includes('courier') || lower.includes('mono')) {
+    return 'Consolas, "Courier New", monospace';
+  }
+  return '"Inter Tight", Arial, sans-serif';
+}
+
+// Re-build the edit layer when the page changes while in edit mode
+const originalRenderPage = renderPage;
+renderPage = async function(pageNum) {
+  const wasEditMode = state.editMode;
+  await originalRenderPage(pageNum);
+  if (wasEditMode) {
+    await buildEditableTextLayer();
+  }
+};
+
+// Re-build the edit layer on zoom while in edit mode
+const originalUpdateZoom = updateZoom;
+updateZoom = async function() {
+  await originalUpdateZoom();
+};
+
+// =====================================================
+// PASTE IMAGE (Ctrl+V) anywhere on canvas
+// =====================================================
+document.addEventListener('paste', async e => {
+  if (app.classList.contains('hidden')) return;
+  // Skip if pasting in an input/textarea
+  const target = e.target;
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+  // Skip if pasting in a contenteditable text element
+  // (we want regular text paste to work in editable blocks)
+  if (target.isContentEditable) {
+    // Check if it has image data
+    let hasImage = false;
+    if (e.clipboardData && e.clipboardData.items) {
+      for (const item of e.clipboardData.items) {
+        if (item.type.startsWith('image/')) { hasImage = true; break; }
+      }
+    }
+    if (!hasImage) return;
+    // If it's an image paste, prevent text paste behavior and add image
+    e.preventDefault();
+  }
+
+  if (!e.clipboardData || !e.clipboardData.items) return;
+
+  for (const item of e.clipboardData.items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const reader = new FileReader();
+      reader.onload = ev => insertPastedImage(ev.target.result, item.type);
+      reader.readAsDataURL(file);
+      return;
+    }
+  }
+});
+
+function insertPastedImage(dataUrl, mimeType) {
+  const img = new Image();
+  img.onload = () => {
+    const aspect = img.width / img.height;
+    let targetWidth = 240;
+    let targetHeight = targetWidth / aspect;
+    // Cap at reasonable size
+    if (targetHeight > 320) {
+      targetHeight = 320;
+      targetWidth = targetHeight * aspect;
+    }
+
+    const pageDim = state.pageDimensions[state.currentPage];
+    if (!pageDim) { showToast('Carregue um PDF primeiro'); return; }
+    const scale = state.baseScale * state.zoom;
+    const cx = (pageDim.displayWidth / 2) / scale;
+    const cy = (pageDim.displayHeight / 2) / scale;
+    const key = getCurrentPageKey();
+    if (!state.pageEdits[key]) state.pageEdits[key] = [];
+    const edit = {
+      id: state.nextElementId++,
+      type: 'image',
+      x: cx - targetWidth / 2,
+      y: cy - targetHeight / 2,
+      width: targetWidth,
+      height: targetHeight,
+      dataUrl,
+      mimeType: mimeType || 'image/png',
+    };
+    state.pageEdits[key].push(edit);
+    renderOverlay();
+    setTimeout(() => {
+      const el = overlayLayer.querySelector(`[data-edit-id="${edit.id}"]`);
+      if (el) selectElement(edit, el);
+    }, 30);
+
+    // If we were in edit mode, exit so the user can interact with the image
+    if (state.editMode) exitEditMode();
+
+    showToast('Imagem colada', 'success');
+  };
+  img.onerror = () => showToast('Não foi possível carregar a imagem colada');
+  img.src = dataUrl;
+}
+
+// =====================================================
+// EXPORT WITH TEXT EDITS
+// =====================================================
+// Hook into the existing export to also apply text replacements
+const originalExportPDF = exportPDF;
+exportPDF = async function(withSignature) {
+  // Save any focused edit before export
+  const focused = document.activeElement;
+  if (focused && focused.classList && focused.classList.contains('editable-block')) {
+    saveEditableBlock(focused);
+    focused.blur();
+  }
+
+  // Convert text edits into "redact + text" overlays so the existing
+  // export pipeline picks them up correctly
+  await applyTextEditsAsOverlays();
+  await originalExportPDF(withSignature);
+  // Clean up the temporary overlays so re-edits don't duplicate
+  removeTextEditOverlays();
+};
+
+const TEXT_EDIT_TAG = '__textedit__';
+
+async function applyTextEditsAsOverlays() {
+  // For each page, for each edited text item, add:
+  //  - a white rectangle covering the original
+  //  - a text element with the new text in the same position/size/font
+  for (const pageNum of Object.keys(state.pageOrder.map((_, i) => i + 1))) {} // no-op
+  for (let i = 0; i < state.pageOrder.length; i++) {
+    const pageInfo = state.pageOrder[i];
+    const key = pageInfo.key;
+    const edits = state.textEdits[key];
+    if (!edits) continue;
+
+    if (!state.pageEdits[key]) state.pageEdits[key] = [];
+
+    // We need page dimensions in display coords
+    let dim = state.pageDimensions[i + 1];
+    if (!dim) {
+      // Quickly compute by getting the page's viewport
+      const page = await state.pdfDoc.getPage(pageInfo.origIndex + 1);
+      const vp = page.getViewport({ scale: state.baseScale, rotation: pageInfo.rotation });
+      dim = {
+        displayWidth: vp.width,
+        displayHeight: vp.height,
+        scale: state.baseScale,
+      };
+      state.pageDimensions[i + 1] = dim;
+    }
+
+    Object.values(edits).forEach(te => {
+      // Coordinates are in display pixels at scale=1.5*currentZoom
+      // We need to convert them to "unscaled display units" used by overlay edits
+      const scale = state.baseScale * state.zoom;
+      const x = te.leftPx / scale;
+      const y = te.topPx / scale;
+      const fontSizeDisplay = te.fontPx / scale;
+
+      // Estimate width: original width was item.width * scale stored as minWidth
+      // We'll use the new text length to size; for the redact box use a conservative
+      // width based on font size and character count of original.
+      const origText = te.originalText || '';
+      const charWidthFactor = 0.55;
+      const origWidth = Math.max(origText.length * fontSizeDisplay * charWidthFactor, 20);
+      // For new text, account for length (but keep redact box wide enough)
+      const newText = te.newText || '';
+      const newWidth = Math.max(newText.length * fontSizeDisplay * charWidthFactor, origWidth);
+
+      // Redact (cover original)
+      const redactPad = fontSizeDisplay * 0.15;
+      const redact = {
+        id: state.nextElementId++,
+        type: 'redact',
+        x: x - redactPad,
+        y: y - redactPad,
+        width: origWidth + redactPad * 2 + 4,
+        height: fontSizeDisplay * 1.25 + redactPad * 2,
+        color: '#ffffff',
+        [TEXT_EDIT_TAG]: true,
+      };
+      state.pageEdits[key].push(redact);
+
+      // New text on top
+      const fontFamily = guessPdfFont(te.fontName);
+      const textEdit = {
+        id: state.nextElementId++,
+        type: 'text',
+        text: newText,
+        x: x,
+        y: y,
+        width: Math.max(newWidth + 8, 40),
+        height: fontSizeDisplay * 1.4,
+        fontSize: fontSizeDisplay,
+        fontFamily: fontFamily,
+        color: '#000000',
+        bold: false,
+        italic: false,
+        align: 'left',
+        [TEXT_EDIT_TAG]: true,
+      };
+      state.pageEdits[key].push(textEdit);
+    });
+  }
+}
+
+function removeTextEditOverlays() {
+  Object.keys(state.pageEdits).forEach(key => {
+    state.pageEdits[key] = state.pageEdits[key].filter(e => !e[TEXT_EDIT_TAG]);
+    if (state.pageEdits[key].length === 0) delete state.pageEdits[key];
+  });
+}
+
+function guessPdfFont(fontName) {
+  if (!fontName) return 'Helvetica';
+  const lower = fontName.toLowerCase();
+  if (lower.includes('times') || lower.includes('serif') || lower.includes('roman')) {
+    return 'Times-Roman';
+  }
+  if (lower.includes('courier') || lower.includes('mono')) {
+    return 'Courier';
+  }
+  return 'Helvetica';
+}
 
 </script>
 </body>
