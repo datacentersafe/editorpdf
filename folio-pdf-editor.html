@@ -710,132 +710,294 @@
     color: var(--ink-soft);
   }
 
-  /* UPLOAD SCREEN */
+  /* UPLOAD SCREEN - Two column layout */
   .upload-screen {
     position: fixed;
     inset: 0;
     background: var(--paper);
     z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px;
     overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .upload-screen::before {
     content: '';
-    position: absolute;
+    position: fixed;
     inset: 0;
     background-image:
-      radial-gradient(circle at 15% 25%, rgba(184, 146, 74, 0.08) 0%, transparent 40%),
-      radial-gradient(circle at 85% 75%, rgba(200, 85, 61, 0.06) 0%, transparent 40%);
+      radial-gradient(circle at 15% 25%, rgba(184, 146, 74, 0.10) 0%, transparent 45%),
+      radial-gradient(circle at 85% 75%, rgba(200, 85, 61, 0.08) 0%, transparent 45%);
     pointer-events: none;
+    z-index: 0;
   }
 
-  .upload-content {
+  .upload-grid {
     position: relative;
-    text-align: center;
-    max-width: 720px;
     z-index: 1;
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 0;
+    align-items: stretch;
+  }
+
+  /* LEFT - Hero */
+  .upload-hero {
+    padding: clamp(40px, 6vh, 80px) clamp(40px, 5vw, 80px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+    border-right: 1px solid var(--line);
+  }
+
+  .upload-hero::after {
+    content: 'Folio';
+    position: absolute;
+    bottom: 30px;
+    right: 30px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+  }
+
+  .upload-hero::before {
+    content: '01';
+    position: absolute;
+    top: 30px;
+    right: 30px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-soft);
+    letter-spacing: 0.1em;
   }
 
   .upload-eyebrow {
     font-size: 11px;
-    letter-spacing: 0.3em;
+    letter-spacing: 0.32em;
     text-transform: uppercase;
     color: var(--accent);
     font-weight: 600;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .upload-eyebrow::before {
+    content: '';
+    width: 32px;
+    height: 1px;
+    background: var(--accent);
   }
 
   .upload-title {
     font-family: 'Fraunces', serif;
-    font-size: clamp(44px, 7vw, 78px);
+    font-size: clamp(48px, 6.5vw, 96px);
     font-weight: 400;
-    line-height: 0.95;
-    letter-spacing: -0.03em;
+    line-height: 0.92;
+    letter-spacing: -0.035em;
     color: var(--ink);
-    margin-bottom: 18px;
+    margin-bottom: 28px;
   }
 
   .upload-title em {
     font-style: italic;
     color: var(--accent);
     font-weight: 500;
+    display: block;
   }
 
   .upload-sub {
-    font-size: 16px;
+    font-size: clamp(15px, 1.2vw, 17px);
     color: var(--ink-soft);
-    line-height: 1.5;
+    line-height: 1.55;
     margin-bottom: 36px;
-    max-width: 520px;
-    margin-left: auto;
-    margin-right: auto;
+    max-width: 480px;
+  }
+
+  .features-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 480px;
+  }
+
+  .feature-row {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    gap: 14px;
+    align-items: baseline;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .feature-row:last-child { border-bottom: none; }
+
+  .feature-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+
+  .feature-body {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .feature-title {
+    font-family: 'Fraunces', serif;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .feature-desc {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+  }
+
+  /* RIGHT - Upload action */
+  .upload-action {
+    padding: clamp(40px, 6vh, 80px) clamp(32px, 4vw, 60px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--paper-warm) 0%, var(--paper) 100%);
+    position: relative;
+  }
+
+  .upload-action::before {
+    content: '02';
+    position: absolute;
+    top: 30px;
+    left: 30px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-soft);
+    letter-spacing: 0.1em;
+  }
+
+  .upload-action-title {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: clamp(24px, 2.4vw, 32px);
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+  }
+
+  .upload-action-sub {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-bottom: 28px;
+    line-height: 1.5;
   }
 
   .upload-zone {
+    display: block;
     border: 2px dashed var(--line);
-    border-radius: 4px;
-    padding: 44px 30px;
-    background: var(--paper-warm);
+    border-radius: 3px;
+    padding: clamp(36px, 6vw, 56px) 24px;
+    background: var(--paper);
     cursor: pointer;
     transition: all 0.3s ease;
+    text-align: center;
     margin-bottom: 24px;
   }
   .upload-zone:hover,
   .upload-zone.dragging {
     border-color: var(--accent);
-    background: rgba(200, 85, 61, 0.04);
+    background: rgba(200, 85, 61, 0.03);
     transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(26, 22, 20, 0.06);
   }
 
-  .upload-icon { font-size: 36px; margin-bottom: 10px; }
+  .upload-icon {
+    font-size: 42px;
+    margin-bottom: 14px;
+    display: block;
+    line-height: 1;
+  }
 
   .upload-cta {
     font-family: 'Fraunces', serif;
     font-size: 22px;
     font-style: italic;
     color: var(--ink);
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .upload-hint {
     font-size: 12px;
     color: var(--ink-soft);
-    letter-spacing: 0.05em;
+    letter-spacing: 0.04em;
   }
 
-  .features {
+  .upload-meta {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 24px;
-    margin-top: 36px;
-    padding-top: 36px;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding-top: 20px;
     border-top: 1px solid var(--line);
-    text-align: left;
   }
 
-  .feature-num {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--accent);
-    margin-bottom: 8px;
-  }
-
-  .feature-title {
-    font-family: 'Fraunces', serif;
-    font-size: 15px;
-    font-weight: 500;
-    margin-bottom: 4px;
-  }
-
-  .feature-desc {
+  .meta-item {
     font-size: 11px;
     color: var(--ink-soft);
     line-height: 1.5;
+  }
+
+  .meta-label {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  /* Tablet & Mobile */
+  @media (max-width: 960px) {
+    .upload-grid {
+      grid-template-columns: 1fr;
+    }
+    .upload-hero {
+      border-right: none;
+      border-bottom: 1px solid var(--line);
+      padding: clamp(40px, 5vh, 60px) clamp(24px, 5vw, 60px) clamp(30px, 4vh, 50px);
+    }
+    .upload-hero::after,
+    .upload-hero::before,
+    .upload-action::before {
+      display: none;
+    }
+    .upload-action {
+      padding: clamp(30px, 4vh, 50px) clamp(24px, 5vw, 60px) clamp(40px, 5vh, 60px);
+    }
+    .upload-title {
+      font-size: clamp(40px, 9vw, 64px);
+    }
+  }
+
+  @media (max-width: 540px) {
+    .upload-meta {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .feature-body {
+      flex-direction: column;
+      gap: 4px;
+    }
   }
 
   /* LOADING */
@@ -1022,43 +1184,75 @@
 
 <!-- UPLOAD SCREEN -->
 <div class="upload-screen" id="uploadScreen">
-  <div class="upload-content">
-    <div class="upload-eyebrow">Editor de PDF Profissional</div>
-    <h1 class="upload-title">Edite com<br><em>precisão.</em></h1>
-    <p class="upload-sub">
-      Editor completo de PDF com OCR, busca de texto, organização de páginas
-      e assinatura digital ICP-Brasil. Tudo no seu navegador.
-    </p>
+  <div class="upload-grid">
 
-    <label class="upload-zone" id="uploadZone">
-      <input type="file" id="fileInput" accept=".pdf,application/pdf" />
-      <div class="upload-icon">📄</div>
-      <div class="upload-cta">Solte seu PDF aqui</div>
-      <div class="upload-hint">ou clique para selecionar — PDF até 50 MB</div>
-    </label>
+    <!-- LEFT: Hero -->
+    <div class="upload-hero">
+      <div class="upload-eyebrow">Editor de PDF Profissional</div>
+      <h1 class="upload-title">Edite com<em>precisão.</em></h1>
+      <p class="upload-sub">
+        Editor completo de PDF com OCR, busca de texto, organização de páginas
+        e assinatura digital ICP-Brasil. Tudo no seu navegador.
+      </p>
 
-    <div class="features">
-      <div>
-        <div class="feature-num">01 / Edição</div>
-        <div class="feature-title">Texto & Imagem</div>
-        <div class="feature-desc">Edite texto, fontes e cores. Insira ou remova imagens em JPG/PNG.</div>
-      </div>
-      <div>
-        <div class="feature-num">02 / Páginas</div>
-        <div class="feature-title">Organize</div>
-        <div class="feature-desc">Reordene por arrastar, rotacione e exclua páginas individuais.</div>
-      </div>
-      <div>
-        <div class="feature-num">03 / OCR</div>
-        <div class="feature-title">Documentos escaneados</div>
-        <div class="feature-desc">Reconheça texto em imagens com OCR (Português + Inglês).</div>
-      </div>
-      <div>
-        <div class="feature-num">04 / Assinar</div>
-        <div class="feature-title">ICP-Brasil</div>
-        <div class="feature-desc">Assine digitalmente com certificado A1 (.pfx/.p12).</div>
+      <div class="features-list">
+        <div class="feature-row">
+          <span class="feature-num">01</span>
+          <div class="feature-body">
+            <span class="feature-title">Edição</span>
+            <span class="feature-desc">Texto, fontes, cores e imagens em JPG/PNG</span>
+          </div>
+        </div>
+        <div class="feature-row">
+          <span class="feature-num">02</span>
+          <div class="feature-body">
+            <span class="feature-title">Páginas</span>
+            <span class="feature-desc">Reordenar, rotacionar e excluir</span>
+          </div>
+        </div>
+        <div class="feature-row">
+          <span class="feature-num">03</span>
+          <div class="feature-body">
+            <span class="feature-title">OCR</span>
+            <span class="feature-desc">Reconhecimento de texto em escaneados</span>
+          </div>
+        </div>
+        <div class="feature-row">
+          <span class="feature-num">04</span>
+          <div class="feature-body">
+            <span class="feature-title">Assinar</span>
+            <span class="feature-desc">Certificado digital A1 (.pfx / .p12)</span>
+          </div>
+        </div>
       </div>
     </div>
+
+    <!-- RIGHT: Action -->
+    <div class="upload-action">
+      <h2 class="upload-action-title">Comece agora</h2>
+      <p class="upload-action-sub">
+        Escolha um arquivo PDF do seu computador para começar a editar.
+      </p>
+
+      <label class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept=".pdf,application/pdf" />
+        <span class="upload-icon">📄</span>
+        <div class="upload-cta">Solte seu PDF aqui</div>
+        <div class="upload-hint">ou clique para selecionar</div>
+      </label>
+
+      <div class="upload-meta">
+        <div class="meta-item">
+          <span class="meta-label">Formato</span>
+          PDF até 50 MB
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Privacidade</span>
+          100% local — nada é enviado
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
