@@ -312,38 +312,61 @@
   /* Editable text blocks (overlay over original PDF text) */
   .editable-block {
     position: absolute;
-    background: rgba(255, 255, 220, 0.5);
-    border: 1px dashed rgba(200, 85, 61, 0.4);
+    background: #ffffff;
+    border: 1px dashed rgba(200, 85, 61, 0.35);
     color: var(--ink);
     cursor: text;
     outline: none;
     white-space: pre;
     overflow: visible;
     transform-origin: 0 0;
-    padding: 0;
+    padding: 0 1px;
     box-sizing: content-box;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
     line-height: 1;
   }
   .editable-block:hover {
-    background: rgba(255, 240, 180, 0.7);
+    background: #fffceb;
     border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(200, 85, 61, 0.2);
   }
   .editable-block:focus {
-    background: rgba(255, 255, 255, 0.98);
+    background: #ffffff;
     border: 1px solid var(--accent);
-    box-shadow: 0 0 0 2px rgba(200, 85, 61, 0.2);
+    box-shadow: 0 0 0 2px rgba(200, 85, 61, 0.25), 0 4px 12px rgba(0,0,0,0.08);
     z-index: 10;
   }
   .editable-block.modified {
-    background: rgba(74, 124, 89, 0.12);
+    background: #f0f8f1;
     border-color: var(--green);
+    border-style: solid;
   }
   .editable-block.modified:focus {
-    background: rgba(255, 255, 255, 0.98);
+    background: #ffffff;
     border-color: var(--green);
-    box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.2);
+    box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.25), 0 4px 12px rgba(0,0,0,0.08);
   }
+
+  /* Show a subtle dimming over the entire PDF in edit mode so editable boxes pop out */
+  .canvas-wrapper.edit-mode #pdfCanvas {
+    filter: brightness(0.96);
+  }
+
+  /* Add a small "edit pencil" icon at the top-right of each block */
+  .editable-block::after {
+    content: '✎';
+    position: absolute;
+    top: -1px;
+    right: 2px;
+    font-size: 8px;
+    color: rgba(200, 85, 61, 0.5);
+    pointer-events: none;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .editable-block:hover::after { opacity: 1; }
+  .editable-block:focus::after { display: none; }
 
   /* Layer that holds editable text blocks - shown only in edit mode */
   .edit-text-layer {
@@ -1853,7 +1876,11 @@ const toast = $('toast');
 // =====================================================
 // UPLOAD
 // =====================================================
-uploadZone.addEventListener('click', () => fileInput.click());
+// Note: the <label class="upload-zone"> wraps the file input,
+// so clicking the label automatically opens the file picker.
+// Adding a manual `click` handler that calls fileInput.click()
+// would open the dialog TWICE — so we don't add one.
+
 ['dragenter', 'dragover'].forEach(evt =>
   uploadZone.addEventListener(evt, e => {
     e.preventDefault();
@@ -3604,8 +3631,12 @@ async function buildEditableTextLayer() {
     const angle = Math.atan2(tx[1], tx[0]);
 
     // pdf.js gives left/baseline at tx[4],tx[5]. We want top-left of bbox.
+    // Use a slightly tighter top to match where the visible text actually starts
+    const baselineY = tx[5];
+    // Most fonts have ascent ~ 0.78 of fontHeight; use that for tighter cover
+    const ascent = fontHeight * 0.82;
+    const top = baselineY - ascent;
     const left = tx[4];
-    const top = tx[5] - fontHeight;
     const width = item.width * scale;
 
     const block = document.createElement('div');
@@ -3625,7 +3656,9 @@ async function buildEditableTextLayer() {
     block.style.left = left + 'px';
     block.style.top = top + 'px';
     block.style.fontSize = fontHeight + 'px';
+    // Use the actual measured width of the original so the cover matches exactly
     block.style.minWidth = width + 'px';
+    block.style.height = (fontHeight * 1.05) + 'px';
     block.style.fontFamily = mapFontName(item.fontName);
 
     if (angle) {
@@ -3637,6 +3670,7 @@ async function buildEditableTextLayer() {
     block.dataset.origLeftPx = left;
     block.dataset.origTopPx = top;
     block.dataset.origFontPx = fontHeight;
+    block.dataset.origWidthPx = width;
     block.dataset.origAngle = angle;
     block.dataset.fontName = item.fontName || '';
 
