@@ -423,19 +423,25 @@
     height: 100%;
     pointer-events: auto;
     display: none;
+    z-index: 1;
   }
   .canvas-wrapper.edit-mode .edit-text-layer {
     display: block;
   }
+
+  /* Overlay layer (imported images, signatures, manual text) sits ABOVE
+     the editable layer so user-added content stays on top */
+  .overlay-layer {
+    z-index: 2;
+  }
+  /* In edit mode: edit-text-layer is interactive,
+     overlay-layer items (imported/pasted images, signatures, etc) STAY interactive */
   .canvas-wrapper.edit-mode .text-layer {
     display: none;
   }
-  .canvas-wrapper.edit-mode .overlay-layer {
-    pointer-events: none;
-  }
-  .canvas-wrapper.edit-mode .overlay-layer > * {
-    pointer-events: none;
-  }
+  /* Note: we DO NOT disable overlay-layer interactions in edit mode.
+     This way, imported images, signatures, and added text boxes can still
+     be moved/selected while editing original PDF text. */
 
   .tool-label {
     position: absolute;
@@ -2329,7 +2335,9 @@ function createEditElement(edit) {
   }
 
   el.addEventListener('mousedown', e => {
-    if (state.selectedTool !== 'select') return;
+    // Allow movement when select tool is active OR when in edit mode
+    // (since edit mode keeps overlay items interactive too)
+    if (state.selectedTool !== 'select' && !state.editMode) return;
     selectElement(edit, el);
     if (edit.type === 'text' && document.activeElement === el) return;
     e.preventDefault();
@@ -4083,15 +4091,10 @@ async function extractPageImages(page, viewport) {
 
     const images = [];
     let nextImgId = 1;
-    // Track current transformation matrix manually (PDF.js gives us cm, q, Q, paintImageXObject ops)
     const ctmStack = [];
-    let ctm = [1, 0, 0, 1, 0, 0]; // identity
-
-    // pdf.js image positions: paintImageXObject (also paintInlineImageXObject)
-    // The image is drawn at (0,0)-(1,1) in the current CTM, with width/height from img object.
+    let ctm = [1, 0, 0, 1, 0, 0];
 
     function multiply(a, b) {
-      // matrices are [a, b, c, d, e, f] meaning [[a,c,e],[b,d,f],[0,0,1]]
       return [
         a[0]*b[0] + a[2]*b[1],
         a[1]*b[0] + a[3]*b[1],
@@ -4100,6 +4103,60 @@ async function extractPageImages(page, viewport) {
         a[0]*b[4] + a[2]*b[5] + a[4],
         a[1]*b[4] + a[3]*b[5] + a[5],
       ];
+    }
+
+    // Helper to record an image at the current CTM
+    function recordImageAtCtm() {
+      const final = multiply(captureViewport.transform, ctm);
+      const x0 = final[4];
+      const y0 = final[5];
+      const x1 = final[0] + final[2] + final[4];
+      const y1 = final[1] + final[3] + final[5];
+
+      const left = Math.min(x0, x1);
+      const top = Math.min(y0, y1);
+      const right = Math.max(x0, x1);
+      const bottom = Math.max(y0, y1);
+      const w = right - left;
+      const h = bottom - top;
+
+      // Be more permissive: allow smaller images (logos, signatures often small)
+      // and tolerate some out-of-bounds (clipping)
+      const minSize = 4; // px
+      if (w > minSize && h > minSize) {
+        // Clip to canvas bounds
+        const clipL = Math.max(0, Math.round(left));
+        const clipT = Math.max(0, Math.round(top));
+        const clipR = Math.min(captureViewport.width, Math.round(right));
+        const clipB = Math.min(captureViewport.height, Math.round(bottom));
+        const clipW = clipR - clipL;
+        const clipH = clipB - clipT;
+
+        if (clipW > minSize && clipH > minSize) {
+          try {
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = clipW;
+            cropCanvas.height = clipH;
+            const cropCtx = cropCanvas.getContext('2d');
+            cropCtx.drawImage(offCanvas,
+              clipL, clipT, clipW, clipH,
+              0, 0, clipW, clipH
+            );
+            const dataUrl = cropCanvas.toDataURL('image/png');
+            images.push({
+              id: 'img_' + nextImgId++,
+              x: clipL,
+              y: clipT,
+              width: clipW,
+              height: clipH,
+              dataUrl,
+              captureScale,
+            });
+          } catch (err) {
+            console.warn('Crop failed:', err);
+          }
+        }
+      }
     }
 
     for (let i = 0; i < fnArray.length; i++) {
@@ -4112,55 +4169,19 @@ async function extractPageImages(page, viewport) {
         ctm = ctmStack.pop() || [1, 0, 0, 1, 0, 0];
       } else if (fn === OPS.transform) {
         ctm = multiply(ctm, args);
-      } else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject || fn === OPS.paintImageMaskXObject) {
-        // Image is drawn in unit square, so corners in user space are:
-        // (0,0), (1,0), (0,1), (1,1) transformed by CTM
-        // Apply the page viewport transform on top to get pixel coords
-        const final = multiply(captureViewport.transform, ctm);
-        // PDF coords: (0,0) is bottom-left of image, (1,1) is top-right (in unit space)
-        // After viewport.transform, Y is flipped to screen coords
-        const x0 = final[4];
-        const y0 = final[5];
-        const x1 = final[0] + final[2] + final[4];
-        const y1 = final[1] + final[3] + final[5];
-
-        const left = Math.min(x0, x1);
-        const top = Math.min(y0, y1);
-        const right = Math.max(x0, x1);
-        const bottom = Math.max(y0, y1);
-        const w = right - left;
-        const h = bottom - top;
-
-        if (w > 8 && h > 8 && left >= 0 && top >= 0 &&
-            right <= captureViewport.width + 1 && bottom <= captureViewport.height + 1) {
-          // Crop this region from the rendered canvas
-          try {
-            const cropCanvas = document.createElement('canvas');
-            cropCanvas.width = Math.round(w);
-            cropCanvas.height = Math.round(h);
-            const cropCtx = cropCanvas.getContext('2d');
-            cropCtx.drawImage(offCanvas,
-              Math.round(left), Math.round(top), Math.round(w), Math.round(h),
-              0, 0, Math.round(w), Math.round(h)
-            );
-            const dataUrl = cropCanvas.toDataURL('image/png');
-            images.push({
-              id: 'img_' + nextImgId++,
-              x: left,
-              y: top,
-              width: w,
-              height: h,
-              dataUrl,
-              captureScale,
-            });
-          } catch (err) {
-            console.warn('Crop failed:', err);
-          }
-        }
+      } else if (
+        fn === OPS.paintImageXObject ||
+        fn === OPS.paintInlineImageXObject ||
+        fn === OPS.paintImageMaskXObject ||
+        fn === OPS.paintJpegXObject ||
+        fn === OPS.paintImageXObjectRepeat ||
+        fn === OPS.paintImageMaskXObjectGroup ||
+        fn === OPS.paintImageMaskXObjectRepeat
+      ) {
+        recordImageAtCtm();
       }
     }
 
-    // Deduplicate images that overlap heavily (same image rendered multiple times)
     return dedupeImages(images);
   } catch (err) {
     console.warn('Image extraction failed:', err);
