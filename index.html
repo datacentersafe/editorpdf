@@ -3647,6 +3647,8 @@ async function enterEditMode() {
   editModeBanner.classList.remove('hidden');
   canvasWrapper.classList.add('edit-mode');
   setTool('select');
+  // Clear cached image detection so we re-run with current rules
+  state.pageImages = {};
   await buildEditableLayer();
   showToast('Modo edição ativado · Clique para selecionar · Duplo clique para editar texto', 'success');
 }
@@ -4156,6 +4158,11 @@ async function extractPageImages(page, viewport) {
       const h = bottom - top;
 
       const minSize = 4;
+      // Reject images that cover most of the page (likely a background, not editable)
+      const pageArea = captureViewport.width * captureViewport.height;
+      const imgArea = w * h;
+      if (imgArea / pageArea > 0.7) return; // skip page-sized images
+
       if (w > minSize && h > minSize) {
         const clipL = Math.max(0, Math.round(left));
         const clipT = Math.max(0, Math.round(top));
@@ -4191,8 +4198,6 @@ async function extractPageImages(page, viewport) {
       }
     }
 
-    // Recursively walk operator list, descending into Form XObjects (paintFormXObjectBegin/End)
-    // and also into XObjects via beginGroup/endGroup
     async function walkOpList(opList, ctm) {
       const fnArray = opList.fnArray;
       const argsArray = opList.argsArray;
@@ -4220,142 +4225,23 @@ async function extractPageImages(page, viewport) {
         ) {
           recordImageAtCtm(localCtm);
         }
-        // Note: Form XObjects (group content) may have their own image operators
-        // but PDF.js typically inlines them in the main op list. If we miss some
-        // (paintFormXObjectBegin / paintFormXObjectEnd), the fallback below
-        // (whole-page fallback scanner) will catch them.
       }
     }
 
     const opList = await page.getOperatorList();
     await walkOpList(opList, [1, 0, 0, 1, 0, 0]);
 
-    // FALLBACK: if no images detected via op list (some PDFs hide everything in
-    // form XObjects or vector graphics), use a simple visual heuristic:
-    // scan the rendered canvas for "non-white rectangular regions" that look
-    // like images. This catches logos, signatures, and stamps in tricky PDFs.
-    if (images.length === 0) {
-      const fallback = await detectImagesByCanvasScan(offCanvas, captureScale);
-      images.push(...fallback);
-    }
+    // NOTE: We intentionally do NOT run a visual fallback scanner.
+    // It often misidentifies page backgrounds, text clusters, or borders
+    // as "images", causing duplication artifacts. If the PDF doesn't
+    // expose images via the operator list, the user can use the
+    // "Apagar" + "Imagem" tools manually.
 
     return dedupeImages(images);
   } catch (err) {
     console.warn('Image extraction failed:', err);
     return [];
   }
-}
-
-// Fallback: scan rendered page for "image-like" colorful blobs
-// (text appears as thin strokes; images have dense colored fills)
-async function detectImagesByCanvasScan(canvas, captureScale) {
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width;
-  const H = canvas.height;
-
-  // Downsample for speed
-  const DS = 4; // sample every 4 pixels
-  const sw = Math.ceil(W / DS);
-  const sh = Math.ceil(H / DS);
-  const sample = ctx.getImageData(0, 0, W, H);
-  const data = sample.data;
-
-  // Build a grid: 1 if pixel is "colorful" (not near white, not pure black thin strokes)
-  // We mark a pixel as "image-like" if it has color variation in its neighborhood
-  const grid = new Uint8Array(sw * sh);
-  for (let y = 0; y < sh; y++) {
-    for (let x = 0; x < sw; x++) {
-      const px = x * DS;
-      const py = y * DS;
-      const i = (py * W + px) * 4;
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      // White-ish?
-      if (r > 240 && g > 240 && b > 240) continue;
-      // Has color (not pure grayscale text)?
-      const maxC = Math.max(r, g, b);
-      const minC = Math.min(r, g, b);
-      const colorful = (maxC - minC) > 25;
-      // OR is a solid dark fill (not just a thin stroke)
-      const dark = maxC < 80;
-      if (colorful || dark) {
-        grid[y * sw + x] = 1;
-      }
-    }
-  }
-
-  // Connected component labeling
-  const labels = new Int32Array(sw * sh);
-  const components = []; // each: {minX, minY, maxX, maxY, count}
-  let nextLabel = 1;
-
-  function flood(sx, sy, label) {
-    const stack = [[sx, sy]];
-    let minX = sx, minY = sy, maxX = sx, maxY = sy, count = 0;
-    while (stack.length) {
-      const [x, y] = stack.pop();
-      if (x < 0 || y < 0 || x >= sw || y >= sh) continue;
-      const idx = y * sw + x;
-      if (grid[idx] !== 1 || labels[idx] !== 0) continue;
-      labels[idx] = label;
-      count++;
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-      // Diagonal too (helps merge)
-      stack.push([x + 1, y + 1], [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1]);
-    }
-    return { minX, minY, maxX, maxY, count };
-  }
-
-  for (let y = 0; y < sh; y++) {
-    for (let x = 0; x < sw; x++) {
-      if (grid[y * sw + x] === 1 && labels[y * sw + x] === 0) {
-        const c = flood(x, y, nextLabel++);
-        components.push(c);
-      }
-    }
-  }
-
-  // Filter components: must be large enough to be a logo/signature/stamp
-  const minArea = 800; // sample units squared
-  const minDim = 30;   // pixels (after upscale)
-  const goodComponents = components.filter(c => {
-    const w = (c.maxX - c.minX) * DS;
-    const h = (c.maxY - c.minY) * DS;
-    return c.count > minArea / (DS * DS) && w > minDim && h > minDim;
-  });
-
-  // Convert to image records
-  const result = [];
-  let nextId = 1;
-  for (const c of goodComponents) {
-    const padPx = 4;
-    const x = Math.max(0, c.minX * DS - padPx);
-    const y = Math.max(0, c.minY * DS - padPx);
-    const w = Math.min(W - x, (c.maxX - c.minX + 1) * DS + padPx * 2);
-    const h = Math.min(H - y, (c.maxY - c.minY + 1) * DS + padPx * 2);
-
-    if (w < minDim || h < minDim) continue;
-
-    try {
-      const cropCanvas = document.createElement('canvas');
-      cropCanvas.width = w;
-      cropCanvas.height = h;
-      const cropCtx = cropCanvas.getContext('2d');
-      cropCtx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
-      const dataUrl = cropCanvas.toDataURL('image/png');
-      result.push({
-        id: 'fallback_img_' + (nextId++),
-        x, y, width: w, height: h, dataUrl, captureScale,
-      });
-    } catch (err) {
-      console.warn('Fallback crop failed:', err);
-    }
-  }
-
-  return result;
 }
 
 function dedupeImages(images) {
