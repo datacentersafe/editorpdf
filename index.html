@@ -309,64 +309,110 @@
     background: var(--paper-dark);
   }
 
-  /* Editable text blocks (overlay over original PDF text) */
+  /* Editable text blocks - independently movable objects */
   .editable-block {
     position: absolute;
     background: #ffffff;
     border: 1px dashed rgba(200, 85, 61, 0.35);
     color: var(--ink);
-    cursor: text;
+    cursor: move;
+    outline: none;
+    overflow: visible;
+    transform-origin: 0 0;
+    padding: 0;
+    box-sizing: content-box;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    line-height: 1;
+    user-select: none;
+  }
+  .editable-block-inner {
+    width: 100%;
+    height: 100%;
+    padding: 0 1px;
     outline: none;
     white-space: pre;
     overflow: visible;
-    transform-origin: 0 0;
-    padding: 0 1px;
-    box-sizing: content-box;
-    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
     line-height: 1;
+    cursor: move;
+  }
+  .editable-block-inner[contenteditable="true"] {
+    cursor: text;
+    user-select: text;
   }
   .editable-block:hover {
-    background: #fffceb;
     border-color: var(--accent);
     box-shadow: 0 0 0 1px rgba(200, 85, 61, 0.2);
+    z-index: 5;
   }
-  .editable-block:focus {
-    background: #ffffff;
+  .editable-block.selected {
     border: 1px solid var(--accent);
-    box-shadow: 0 0 0 2px rgba(200, 85, 61, 0.25), 0 4px 12px rgba(0,0,0,0.08);
+    box-shadow: 0 0 0 2px rgba(200, 85, 61, 0.25), 0 4px 12px rgba(0,0,0,0.06);
     z-index: 10;
+  }
+  .editable-block.editing {
+    cursor: text;
+    border: 1px solid var(--accent);
+    box-shadow: 0 0 0 2px rgba(200, 85, 61, 0.3), 0 4px 16px rgba(0,0,0,0.1);
+    z-index: 20;
   }
   .editable-block.modified {
     background: #f0f8f1;
     border-color: var(--green);
     border-style: solid;
   }
-  .editable-block.modified:focus {
-    background: #ffffff;
-    border-color: var(--green);
-    box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.25), 0 4px 12px rgba(0,0,0,0.08);
+  .editable-block.modified.selected {
+    box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.25), 0 4px 12px rgba(0,0,0,0.06);
   }
 
-  /* Show a subtle dimming over the entire PDF in edit mode so editable boxes pop out */
-  .canvas-wrapper.edit-mode #pdfCanvas {
-    filter: brightness(0.96);
+  .editable-image-block {
+    background: transparent;
+    cursor: move;
+  }
+  .editable-image-block:hover {
+    box-shadow: 0 0 0 2px rgba(200, 85, 61, 0.4);
+  }
+  .editable-image-block.selected {
+    box-shadow: 0 0 0 2px var(--accent), 0 4px 12px rgba(0,0,0,0.08);
   }
 
-  /* Add a small "edit pencil" icon at the top-right of each block */
-  .editable-block::after {
-    content: '✎';
+  /* Handles on selected blocks */
+  .eb-handle {
     position: absolute;
-    top: -1px;
-    right: 2px;
-    font-size: 8px;
-    color: rgba(200, 85, 61, 0.5);
-    pointer-events: none;
-    line-height: 1;
-    opacity: 0;
-    transition: opacity 0.15s;
+    pointer-events: auto;
   }
-  .editable-block:hover::after { opacity: 1; }
-  .editable-block:focus::after { display: none; }
+  .eb-handle-se {
+    width: 10px;
+    height: 10px;
+    bottom: -5px;
+    right: -5px;
+    background: var(--accent);
+    border: 1.5px solid white;
+    cursor: se-resize;
+    border-radius: 0;
+  }
+  .eb-handle-delete {
+    width: 22px;
+    height: 22px;
+    top: -11px;
+    right: -11px;
+    background: var(--accent);
+    color: white;
+    border: 2px solid white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  }
+
+  /* In edit mode, dim the canvas slightly so blocks pop out */
+  .canvas-wrapper.edit-mode #pdfCanvas {
+    filter: brightness(0.95);
+  }
 
   /* Layer that holds editable text blocks - shown only in edit mode */
   .edit-text-layer {
@@ -1669,7 +1715,7 @@
     <div class="edit-mode-banner-text">
       <span class="edit-mode-pulse"></span>
       <strong>Modo edição</strong>
-      <span>Clique em qualquer texto para editar · Cole imagens com Ctrl+V</span>
+      <span>Clique para selecionar e arrastar · Duplo clique para editar texto · Painel direito ajusta fonte/cor</span>
     </div>
     <button class="edit-mode-exit" id="editModeExit">Sair do modo edição</button>
   </div>
@@ -3564,10 +3610,18 @@ document.addEventListener('keydown', e => {
 });
 
 // =====================================================
-// EDIT TEXT MODE - "Word-style" inline editing
+// EDIT TEXT MODE - Each text/image block is a movable object
+// with editable properties (font, size, color, position)
 // =====================================================
 state.editMode = false;
-state.textEdits = {};  // { pageKey: { itemIdx: { newText, originalText, ...layout } } }
+// textEdits structure: { pageKey: { itemIdx: { newText, posX, posY, fontSize, color, bold, italic, fontFamily, deleted, ... } } }
+state.textEdits = {};
+// imageEdits structure: { pageKey: { imageId: { x, y, width, height, deleted, dataUrl, mimeType } } }
+state.imageEdits = {};
+// Cache of extracted images per page
+state.pageImages = {};
+state.selectedEditableBlock = null;
+
 const editTextLayer = $('editTextLayer');
 const editModeBanner = $('editModeBanner');
 
@@ -3585,8 +3639,8 @@ async function enterEditMode() {
   editModeBanner.classList.remove('hidden');
   canvasWrapper.classList.add('edit-mode');
   setTool('select');
-  await buildEditableTextLayer();
-  showToast('Modo edição ativado · Clique em qualquer texto para editar', 'success');
+  await buildEditableLayer();
+  showToast('Modo edição ativado · Clique para selecionar · Duplo clique para editar texto', 'success');
 }
 
 function exitEditMode() {
@@ -3594,17 +3648,18 @@ function exitEditMode() {
   $('editTextBtn').classList.remove('active');
   editModeBanner.classList.add('hidden');
   canvasWrapper.classList.remove('edit-mode');
-  // Save any pending edits from focused element
   const focused = document.activeElement;
   if (focused && focused.classList.contains('editable-block')) {
-    saveEditableBlock(focused);
+    saveEditableBlockText(focused);
     focused.blur();
   }
   editTextLayer.innerHTML = '';
+  state.selectedEditableBlock = null;
+  showEmptyInspector();
   showToast('Modo edição encerrado');
 }
 
-async function buildEditableTextLayer() {
+async function buildEditableLayer() {
   editTextLayer.innerHTML = '';
   if (!state.pdfDoc) return;
 
@@ -3615,57 +3670,68 @@ async function buildEditableTextLayer() {
   const scale = state.baseScale * state.zoom;
   const viewport = page.getViewport({ scale, rotation: pageInfo.rotation });
 
+  // ==== TEXT BLOCKS ====
   const textContent = state.textContent[pageInfo.key] || await page.getTextContent();
   state.textContent[pageInfo.key] = textContent;
-
   if (!state.textEdits[pageInfo.key]) state.textEdits[pageInfo.key] = {};
   const pageEdits = state.textEdits[pageInfo.key];
 
-  // For each text item from PDF.js, create an editable contenteditable span
   textContent.items.forEach((item, idx) => {
     if (!item.str || !item.str.trim()) return;
 
-    // Compute final transform on the page
     const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
     const fontHeight = Math.hypot(tx[2], tx[3]);
     const angle = Math.atan2(tx[1], tx[0]);
-
-    // pdf.js gives left/baseline at tx[4],tx[5]. We want top-left of bbox.
-    // Use a slightly tighter top to match where the visible text actually starts
     const baselineY = tx[5];
-    // Most fonts have ascent ~ 0.78 of fontHeight; use that for tighter cover
     const ascent = fontHeight * 0.82;
     const top = baselineY - ascent;
     const left = tx[4];
     const width = item.width * scale;
 
+    const saved = pageEdits[idx] || {};
+    if (saved.deleted) return; // skip deleted blocks
+
+    // Create a wrapper for movable + editable block
     const block = document.createElement('div');
     block.className = 'editable-block';
-    block.contentEditable = 'true';
-    block.spellcheck = false;
     block.dataset.itemIdx = idx;
     block.dataset.pageKey = pageInfo.key;
+    block.dataset.blockType = 'text';
 
-    // Use saved text if exists
-    const saved = pageEdits[idx];
-    block.textContent = saved ? saved.newText : item.str;
-    if (saved && saved.newText !== item.str) {
-      block.classList.add('modified');
-    }
+    // Position (with optional offset from saved drag)
+    const finalLeft = saved.posX != null ? saved.posX : left;
+    const finalTop = saved.posY != null ? saved.posY : top;
+    const finalWidth = saved.width != null ? saved.width : Math.max(width, 30);
+    const finalFontSize = saved.fontSize != null ? saved.fontSize : fontHeight;
 
-    block.style.left = left + 'px';
-    block.style.top = top + 'px';
-    block.style.fontSize = fontHeight + 'px';
-    // Use the actual measured width of the original so the cover matches exactly
-    block.style.minWidth = width + 'px';
-    block.style.height = (fontHeight * 1.05) + 'px';
-    block.style.fontFamily = mapFontName(item.fontName);
+    block.style.left = finalLeft + 'px';
+    block.style.top = finalTop + 'px';
+    block.style.width = finalWidth + 'px';
+    block.style.height = (finalFontSize * 1.15) + 'px';
+    block.style.fontSize = finalFontSize + 'px';
+    block.style.fontFamily = saved.fontFamily ? mapFontFamilyToCss(saved.fontFamily) : mapFontName(item.fontName);
+    block.style.color = saved.color || '#000000';
+    block.style.fontWeight = saved.bold ? '700' : '400';
+    block.style.fontStyle = saved.italic ? 'italic' : 'normal';
+    block.style.textAlign = saved.align || 'left';
 
-    if (angle) {
+    if (angle && saved.posX == null) {
       block.style.transform = `rotate(${angle}rad)`;
     }
 
-    // Store original layout for export
+    // Inner text content
+    const inner = document.createElement('div');
+    inner.className = 'editable-block-inner';
+    inner.contentEditable = 'false'; // Default not editable - user must double-click
+    inner.spellcheck = false;
+    inner.textContent = saved.newText != null ? saved.newText : item.str;
+    block.appendChild(inner);
+
+    if (saved.newText != null && saved.newText !== item.str) {
+      block.classList.add('modified');
+    }
+
+    // Store original metadata
     block.dataset.origStr = item.str;
     block.dataset.origLeftPx = left;
     block.dataset.origTopPx = top;
@@ -3674,63 +3740,623 @@ async function buildEditableTextLayer() {
     block.dataset.origAngle = angle;
     block.dataset.fontName = item.fontName || '';
 
-    block.addEventListener('focus', () => {
-      // Select all on first click
-      requestAnimationFrame(() => {
-        const range = document.createRange();
-        range.selectNodeContents(block);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      });
+    // Click = select; Double-click = enter text edit mode
+    block.addEventListener('mousedown', e => {
+      if (inner.contentEditable === 'true') return;  // already editing
+      e.stopPropagation();
+      selectEditableBlock(block);
+      startBlockDrag(e, block);
     });
 
-    block.addEventListener('blur', () => saveEditableBlock(block));
+    block.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      e.preventDefault();
+      enterTextEditMode(block, inner);
+    });
 
-    block.addEventListener('keydown', e => {
+    inner.addEventListener('blur', () => {
+      inner.contentEditable = 'false';
+      block.classList.remove('editing');
+      saveEditableBlockText(block);
+    });
+
+    inner.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        block.blur();
+        inner.blur();
       }
     });
 
     editTextLayer.appendChild(block);
   });
 
-  if (textContent.items.length === 0) {
-    showToast('Nenhum texto detectado nesta página. Use o OCR para documentos escaneados.');
+  // ==== IMAGE BLOCKS (extracted from PDF) ====
+  await extractAndBuildImageBlocks(pageInfo, page, viewport);
+
+  if (textContent.items.length === 0 && (!state.pageImages[pageInfo.key] || state.pageImages[pageInfo.key].length === 0)) {
+    showToast('Nenhum texto detectado. Use o OCR ou adicione conteúdo manualmente.');
   }
 }
 
-function saveEditableBlock(block) {
+function selectEditableBlock(block) {
+  // Deselect previous
+  editTextLayer.querySelectorAll('.editable-block.selected').forEach(b => {
+    b.classList.remove('selected');
+    b.querySelectorAll('.eb-handle').forEach(h => h.remove());
+  });
+  block.classList.add('selected');
+  state.selectedEditableBlock = block;
+
+  // Add resize/delete handles
+  if (block.dataset.blockType === 'text') {
+    addBlockHandles(block);
+    showEditableBlockInspector(block);
+  } else if (block.dataset.blockType === 'image') {
+    addBlockHandles(block);
+    showEditableImageInspector(block);
+  }
+}
+
+function addBlockHandles(block) {
+  const handle = document.createElement('div');
+  handle.className = 'eb-handle eb-handle-se';
+  handle.addEventListener('mousedown', e => {
+    e.stopPropagation();
+    e.preventDefault();
+    startBlockResize(e, block);
+  });
+  block.appendChild(handle);
+
+  const del = document.createElement('button');
+  del.className = 'eb-handle eb-handle-delete';
+  del.textContent = '×';
+  del.addEventListener('click', e => {
+    e.stopPropagation();
+    deleteEditableBlock(block);
+  });
+  block.appendChild(del);
+}
+
+function deleteEditableBlock(block) {
+  const pageKey = block.dataset.pageKey;
+  const blockType = block.dataset.blockType;
+  if (blockType === 'text') {
+    const idx = parseInt(block.dataset.itemIdx);
+    if (!state.textEdits[pageKey]) state.textEdits[pageKey] = {};
+    state.textEdits[pageKey][idx] = {
+      ...(state.textEdits[pageKey][idx] || {}),
+      deleted: true,
+    };
+  } else if (blockType === 'image') {
+    const imgId = block.dataset.imageId;
+    if (!state.imageEdits[pageKey]) state.imageEdits[pageKey] = {};
+    state.imageEdits[pageKey][imgId] = {
+      ...(state.imageEdits[pageKey][imgId] || {}),
+      deleted: true,
+    };
+  }
+  block.remove();
+  state.selectedEditableBlock = null;
+  showEmptyInspector();
+  showToast('Elemento removido (será aplicado na exportação)');
+}
+
+function enterTextEditMode(block, inner) {
+  inner.contentEditable = 'true';
+  block.classList.add('editing');
+  inner.focus();
+  // Select all text
+  requestAnimationFrame(() => {
+    const range = document.createRange();
+    range.selectNodeContents(inner);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+}
+
+function startBlockDrag(e, block) {
+  const inner = block.querySelector('.editable-block-inner');
+  if (inner && inner.contentEditable === 'true') return;
+
+  const startX = e.clientX, startY = e.clientY;
+  const origLeft = parseFloat(block.style.left);
+  const origTop = parseFloat(block.style.top);
+  let moved = false;
+
+  const onMove = ev => {
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+    block.style.left = (origLeft + dx) + 'px';
+    block.style.top = (origTop + dy) + 'px';
+  };
+
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if (moved) {
+      // Save new position - must clear the rotation transform to keep it natural after move
+      block.style.transform = '';
+      saveEditableBlockLayout(block);
+    }
+  };
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function startBlockResize(e, block) {
+  const startX = e.clientX, startY = e.clientY;
+  const origW = parseFloat(block.style.width);
+  const origH = parseFloat(block.style.height);
+  const origFontSize = parseFloat(block.style.fontSize);
+  const blockType = block.dataset.blockType;
+
+  const onMove = ev => {
+    const dw = ev.clientX - startX;
+    const dh = ev.clientY - startY;
+    const newW = Math.max(20, origW + dw);
+    const newH = Math.max(12, origH + dh);
+    block.style.width = newW + 'px';
+    block.style.height = newH + 'px';
+
+    // For text blocks, scale font size proportionally to height
+    if (blockType === 'text') {
+      const ratio = newH / origH;
+      const newFontSize = Math.max(6, origFontSize * ratio);
+      block.style.fontSize = newFontSize + 'px';
+    }
+  };
+
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    saveEditableBlockLayout(block);
+    // Refresh inspector to show new font size
+    if (state.selectedEditableBlock === block) {
+      if (blockType === 'text') showEditableBlockInspector(block);
+      else if (blockType === 'image') showEditableImageInspector(block);
+    }
+  };
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function saveEditableBlockLayout(block) {
+  const pageKey = block.dataset.pageKey;
+  const blockType = block.dataset.blockType;
+
+  if (blockType === 'text') {
+    const idx = parseInt(block.dataset.itemIdx);
+    if (!state.textEdits[pageKey]) state.textEdits[pageKey] = {};
+    const inner = block.querySelector('.editable-block-inner');
+    state.textEdits[pageKey][idx] = {
+      ...(state.textEdits[pageKey][idx] || {}),
+      itemIdx: idx,
+      originalText: block.dataset.origStr,
+      newText: inner.textContent,
+      origLeftPx: parseFloat(block.dataset.origLeftPx),
+      origTopPx: parseFloat(block.dataset.origTopPx),
+      origFontPx: parseFloat(block.dataset.origFontPx),
+      origWidthPx: parseFloat(block.dataset.origWidthPx),
+      origAngle: parseFloat(block.dataset.origAngle),
+      fontName: block.dataset.fontName,
+      posX: parseFloat(block.style.left),
+      posY: parseFloat(block.style.top),
+      width: parseFloat(block.style.width),
+      height: parseFloat(block.style.height),
+      fontSize: parseFloat(block.style.fontSize),
+      fontFamily: block.dataset.editFont || pdfFontFromCss(block.style.fontFamily),
+      color: rgbToHex(block.style.color || '#000000'),
+      bold: block.style.fontWeight === '700' || block.style.fontWeight === 'bold',
+      italic: block.style.fontStyle === 'italic',
+      align: block.style.textAlign || 'left',
+    };
+    block.classList.add('modified');
+  } else if (blockType === 'image') {
+    const imgId = block.dataset.imageId;
+    if (!state.imageEdits[pageKey]) state.imageEdits[pageKey] = {};
+    state.imageEdits[pageKey][imgId] = {
+      ...(state.imageEdits[pageKey][imgId] || {}),
+      imageId: imgId,
+      posX: parseFloat(block.style.left),
+      posY: parseFloat(block.style.top),
+      width: parseFloat(block.style.width),
+      height: parseFloat(block.style.height),
+    };
+  }
+}
+
+function saveEditableBlockText(block) {
+  const inner = block.querySelector('.editable-block-inner');
   const pageKey = block.dataset.pageKey;
   const idx = parseInt(block.dataset.itemIdx);
-  const newText = block.textContent;
+  const newText = inner.textContent;
   const origStr = block.dataset.origStr;
 
   if (!state.textEdits[pageKey]) state.textEdits[pageKey] = {};
+  const existing = state.textEdits[pageKey][idx] || {};
 
-  if (newText === origStr) {
-    // Reverted to original - clear the edit
+  if (newText === origStr && !existing.posX && !existing.fontSize && !existing.color) {
     delete state.textEdits[pageKey][idx];
     block.classList.remove('modified');
   } else {
     state.textEdits[pageKey][idx] = {
+      ...existing,
       itemIdx: idx,
       originalText: origStr,
       newText: newText,
-      leftPx: parseFloat(block.dataset.origLeftPx),
-      topPx: parseFloat(block.dataset.origTopPx),
-      fontPx: parseFloat(block.dataset.origFontPx),
-      angle: parseFloat(block.dataset.origAngle),
+      origLeftPx: parseFloat(block.dataset.origLeftPx),
+      origTopPx: parseFloat(block.dataset.origTopPx),
+      origFontPx: parseFloat(block.dataset.origFontPx),
+      origWidthPx: parseFloat(block.dataset.origWidthPx),
+      origAngle: parseFloat(block.dataset.origAngle),
       fontName: block.dataset.fontName,
     };
-    block.classList.add('modified');
+    if (newText !== origStr) block.classList.add('modified');
   }
 }
 
+// =====================================================
+// IMAGE EXTRACTION FROM PDF
+// =====================================================
+async function extractAndBuildImageBlocks(pageInfo, page, viewport) {
+  const cacheKey = pageInfo.key;
+
+  // Try to extract images on first visit
+  if (!state.pageImages[cacheKey]) {
+    state.pageImages[cacheKey] = await extractPageImages(page, viewport);
+  }
+
+  const images = state.pageImages[cacheKey];
+  if (!images || images.length === 0) return;
+
+  if (!state.imageEdits[cacheKey]) state.imageEdits[cacheKey] = {};
+  const edits = state.imageEdits[cacheKey];
+
+  images.forEach(img => {
+    const editInfo = edits[img.id] || {};
+    if (editInfo.deleted) return;
+
+    const block = document.createElement('div');
+    block.className = 'editable-block editable-image-block';
+    block.dataset.imageId = img.id;
+    block.dataset.pageKey = pageInfo.key;
+    block.dataset.blockType = 'image';
+
+    // Position - scale based on current viewport scale
+    const scaleRatio = (state.baseScale * state.zoom) / img.captureScale;
+    const x = editInfo.posX != null ? editInfo.posX : img.x * scaleRatio;
+    const y = editInfo.posY != null ? editInfo.posY : img.y * scaleRatio;
+    const w = editInfo.width != null ? editInfo.width : img.width * scaleRatio;
+    const h = editInfo.height != null ? editInfo.height : img.height * scaleRatio;
+
+    block.style.left = x + 'px';
+    block.style.top = y + 'px';
+    block.style.width = w + 'px';
+    block.style.height = h + 'px';
+
+    // Show the image in the box
+    const imgEl = document.createElement('img');
+    imgEl.src = img.dataUrl;
+    imgEl.draggable = false;
+    imgEl.style.width = '100%';
+    imgEl.style.height = '100%';
+    imgEl.style.objectFit = 'fill';
+    imgEl.style.pointerEvents = 'none';
+    block.appendChild(imgEl);
+
+    block.dataset.origX = img.x * scaleRatio;
+    block.dataset.origY = img.y * scaleRatio;
+    block.dataset.origW = img.width * scaleRatio;
+    block.dataset.origH = img.height * scaleRatio;
+
+    block.addEventListener('mousedown', e => {
+      e.stopPropagation();
+      selectEditableBlock(block);
+      startBlockDrag(e, block);
+    });
+
+    editTextLayer.appendChild(block);
+  });
+}
+
+async function extractPageImages(page, viewport) {
+  // Use PDF.js operator list to find image positions and the rendered canvas to crop them
+  try {
+    const opList = await page.getOperatorList();
+    const fnArray = opList.fnArray;
+    const argsArray = opList.argsArray;
+    const OPS = pdfjsLib.OPS;
+
+    const captureScale = viewport.scale;
+    const captureViewport = page.getViewport({ scale: captureScale, rotation: viewport.rotation });
+
+    // Render the page to an off-screen canvas at capture scale
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = captureViewport.width;
+    offCanvas.height = captureViewport.height;
+    const offCtx = offCanvas.getContext('2d');
+    await page.render({ canvasContext: offCtx, viewport: captureViewport }).promise;
+
+    const images = [];
+    let nextImgId = 1;
+    // Track current transformation matrix manually (PDF.js gives us cm, q, Q, paintImageXObject ops)
+    const ctmStack = [];
+    let ctm = [1, 0, 0, 1, 0, 0]; // identity
+
+    // pdf.js image positions: paintImageXObject (also paintInlineImageXObject)
+    // The image is drawn at (0,0)-(1,1) in the current CTM, with width/height from img object.
+
+    function multiply(a, b) {
+      // matrices are [a, b, c, d, e, f] meaning [[a,c,e],[b,d,f],[0,0,1]]
+      return [
+        a[0]*b[0] + a[2]*b[1],
+        a[1]*b[0] + a[3]*b[1],
+        a[0]*b[2] + a[2]*b[3],
+        a[1]*b[2] + a[3]*b[3],
+        a[0]*b[4] + a[2]*b[5] + a[4],
+        a[1]*b[4] + a[3]*b[5] + a[5],
+      ];
+    }
+
+    for (let i = 0; i < fnArray.length; i++) {
+      const fn = fnArray[i];
+      const args = argsArray[i];
+
+      if (fn === OPS.save) {
+        ctmStack.push([...ctm]);
+      } else if (fn === OPS.restore) {
+        ctm = ctmStack.pop() || [1, 0, 0, 1, 0, 0];
+      } else if (fn === OPS.transform) {
+        ctm = multiply(ctm, args);
+      } else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject || fn === OPS.paintImageMaskXObject) {
+        // Image is drawn in unit square, so corners in user space are:
+        // (0,0), (1,0), (0,1), (1,1) transformed by CTM
+        // Apply the page viewport transform on top to get pixel coords
+        const final = multiply(captureViewport.transform, ctm);
+        // PDF coords: (0,0) is bottom-left of image, (1,1) is top-right (in unit space)
+        // After viewport.transform, Y is flipped to screen coords
+        const x0 = final[4];
+        const y0 = final[5];
+        const x1 = final[0] + final[2] + final[4];
+        const y1 = final[1] + final[3] + final[5];
+
+        const left = Math.min(x0, x1);
+        const top = Math.min(y0, y1);
+        const right = Math.max(x0, x1);
+        const bottom = Math.max(y0, y1);
+        const w = right - left;
+        const h = bottom - top;
+
+        if (w > 8 && h > 8 && left >= 0 && top >= 0 &&
+            right <= captureViewport.width + 1 && bottom <= captureViewport.height + 1) {
+          // Crop this region from the rendered canvas
+          try {
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = Math.round(w);
+            cropCanvas.height = Math.round(h);
+            const cropCtx = cropCanvas.getContext('2d');
+            cropCtx.drawImage(offCanvas,
+              Math.round(left), Math.round(top), Math.round(w), Math.round(h),
+              0, 0, Math.round(w), Math.round(h)
+            );
+            const dataUrl = cropCanvas.toDataURL('image/png');
+            images.push({
+              id: 'img_' + nextImgId++,
+              x: left,
+              y: top,
+              width: w,
+              height: h,
+              dataUrl,
+              captureScale,
+            });
+          } catch (err) {
+            console.warn('Crop failed:', err);
+          }
+        }
+      }
+    }
+
+    // Deduplicate images that overlap heavily (same image rendered multiple times)
+    return dedupeImages(images);
+  } catch (err) {
+    console.warn('Image extraction failed:', err);
+    return [];
+  }
+}
+
+function dedupeImages(images) {
+  const out = [];
+  for (const img of images) {
+    let dup = false;
+    for (const other of out) {
+      const overlapX = Math.max(0, Math.min(img.x + img.width, other.x + other.width) - Math.max(img.x, other.x));
+      const overlapY = Math.max(0, Math.min(img.y + img.height, other.y + other.height) - Math.max(img.y, other.y));
+      const overlapArea = overlapX * overlapY;
+      const imgArea = img.width * img.height;
+      if (overlapArea / imgArea > 0.85) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) out.push(img);
+  }
+  return out;
+}
+
+// =====================================================
+// INSPECTOR FOR EDITABLE BLOCKS
+// =====================================================
+function showEditableBlockInspector(block) {
+  elementType.textContent = 'TEXTO';
+  const inner = block.querySelector('.editable-block-inner');
+  const fontSize = parseFloat(block.style.fontSize) || 14;
+  const color = rgbToHex(block.style.color || '#000000');
+  const bold = block.style.fontWeight === '700' || block.style.fontWeight === 'bold';
+  const italic = block.style.fontStyle === 'italic';
+  const align = block.style.textAlign || 'left';
+  const fontFamily = block.dataset.editFont || pdfFontFromCss(block.style.fontFamily);
+
+  inspector.innerHTML = `
+    <div class="field">
+      <label class="field-label">Conteúdo</label>
+      <textarea class="field-input" id="eb-text" rows="3">${escapeHtml(inner.textContent)}</textarea>
+    </div>
+    <div class="field">
+      <label class="field-label">Fonte</label>
+      <select class="field-select" id="eb-font">
+        <option value="Helvetica">Helvetica</option>
+        <option value="Times-Roman">Times Roman</option>
+        <option value="Courier">Courier</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label">Tamanho</label>
+        <input class="field-input" id="eb-size" type="number" min="6" max="200" value="${Math.round(fontSize)}">
+      </div>
+      <div class="field">
+        <label class="field-label">Cor</label>
+        <input class="color-input" id="eb-color" type="color" value="${color}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label">Estilo</label>
+        <select class="field-select" id="eb-style">
+          <option value="normal">Normal</option>
+          <option value="bold">Negrito</option>
+          <option value="italic">Itálico</option>
+          <option value="bolditalic">Negrito Itálico</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Alinhamento</label>
+        <select class="field-select" id="eb-align">
+          <option value="left">Esquerda</option>
+          <option value="center">Centro</option>
+          <option value="right">Direita</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="field-label">X</label><input class="field-input" id="eb-x" type="number" value="${Math.round(parseFloat(block.style.left))}"></div>
+      <div class="field"><label class="field-label">Y</label><input class="field-input" id="eb-y" type="number" value="${Math.round(parseFloat(block.style.top))}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="field-label">Largura</label><input class="field-input" id="eb-w" type="number" value="${Math.round(parseFloat(block.style.width))}"></div>
+      <div class="field"><label class="field-label">Altura</label><input class="field-input" id="eb-h" type="number" value="${Math.round(parseFloat(block.style.height))}"></div>
+    </div>
+    <button class="btn btn-accent" id="eb-delete" style="width:100%;margin-top:12px;">Remover Bloco</button>
+  `;
+
+  $('eb-font').value = fontFamily;
+  $('eb-style').value = bold && italic ? 'bolditalic' : bold ? 'bold' : italic ? 'italic' : 'normal';
+  $('eb-align').value = align;
+
+  const onChange = () => saveEditableBlockLayout(block);
+
+  $('eb-text').addEventListener('input', e => {
+    inner.textContent = e.target.value;
+    block.classList.add('modified');
+    onChange();
+  });
+  $('eb-font').addEventListener('change', e => {
+    block.dataset.editFont = e.target.value;
+    block.style.fontFamily = mapFontFamilyToCss(e.target.value);
+    onChange();
+  });
+  $('eb-size').addEventListener('input', e => {
+    const v = parseInt(e.target.value) || 14;
+    block.style.fontSize = v + 'px';
+    block.style.height = (v * 1.15) + 'px';
+    onChange();
+  });
+  $('eb-color').addEventListener('input', e => {
+    block.style.color = e.target.value;
+    onChange();
+  });
+  $('eb-style').addEventListener('change', e => {
+    const v = e.target.value;
+    block.style.fontWeight = v.includes('bold') ? '700' : '400';
+    block.style.fontStyle = v.includes('italic') ? 'italic' : 'normal';
+    onChange();
+  });
+  $('eb-align').addEventListener('change', e => {
+    block.style.textAlign = e.target.value;
+    onChange();
+  });
+  $('eb-x').addEventListener('input', e => { block.style.left = (parseInt(e.target.value) || 0) + 'px'; block.style.transform = ''; onChange(); });
+  $('eb-y').addEventListener('input', e => { block.style.top = (parseInt(e.target.value) || 0) + 'px'; block.style.transform = ''; onChange(); });
+  $('eb-w').addEventListener('input', e => { block.style.width = (parseInt(e.target.value) || 30) + 'px'; onChange(); });
+  $('eb-h').addEventListener('input', e => {
+    const v = parseInt(e.target.value) || 14;
+    block.style.height = v + 'px';
+    onChange();
+  });
+  $('eb-delete').addEventListener('click', () => deleteEditableBlock(block));
+}
+
+function showEditableImageInspector(block) {
+  elementType.textContent = 'IMAGEM';
+  const img = block.querySelector('img');
+  inspector.innerHTML = `
+    <div class="field">
+      <label class="field-label">Pré-visualização</label>
+      <div style="border:1px solid var(--line);padding:8px;background:var(--paper);text-align:center;border-radius:2px;max-height:160px;overflow:hidden;">
+        <img src="${img.src}" style="max-width:100%;max-height:140px;display:inline-block;">
+      </div>
+    </div>
+    <div class="alert info" style="font-size:11px;">
+      ⓘ Imagem extraída do PDF. Você pode mover, redimensionar ou excluir.
+      A alteração será aplicada na exportação.
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="field-label">X</label><input class="field-input" id="ei-x" type="number" value="${Math.round(parseFloat(block.style.left))}"></div>
+      <div class="field"><label class="field-label">Y</label><input class="field-input" id="ei-y" type="number" value="${Math.round(parseFloat(block.style.top))}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label class="field-label">Largura</label><input class="field-input" id="ei-w" type="number" value="${Math.round(parseFloat(block.style.width))}"></div>
+      <div class="field"><label class="field-label">Altura</label><input class="field-input" id="ei-h" type="number" value="${Math.round(parseFloat(block.style.height))}"></div>
+    </div>
+    <button class="btn btn-accent" id="ei-delete" style="width:100%;margin-top:12px;">Remover Imagem</button>
+  `;
+  const onChange = () => saveEditableBlockLayout(block);
+  $('ei-x').addEventListener('input', e => { block.style.left = (parseInt(e.target.value) || 0) + 'px'; onChange(); });
+  $('ei-y').addEventListener('input', e => { block.style.top = (parseInt(e.target.value) || 0) + 'px'; onChange(); });
+  $('ei-w').addEventListener('input', e => { block.style.width = (parseInt(e.target.value) || 20) + 'px'; onChange(); });
+  $('ei-h').addEventListener('input', e => { block.style.height = (parseInt(e.target.value) || 20) + 'px'; onChange(); });
+  $('ei-delete').addEventListener('click', () => deleteEditableBlock(block));
+}
+
+function rgbToHex(rgb) {
+  if (!rgb) return '#000000';
+  if (rgb.startsWith('#')) return rgb;
+  const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+  if (!m) return '#000000';
+  const toHex = n => parseInt(n).toString(16).padStart(2, '0');
+  return '#' + toHex(m[1]) + toHex(m[2]) + toHex(m[3]);
+}
+
+function pdfFontFromCss(cssFont) {
+  if (!cssFont) return 'Helvetica';
+  const lower = cssFont.toLowerCase();
+  if (lower.includes('times') || lower.includes('georgia') || lower.includes('serif')) return 'Times-Roman';
+  if (lower.includes('courier') || lower.includes('mono')) return 'Courier';
+  return 'Helvetica';
+}
+
+function mapFontFamilyToCss(pdfFont) {
+  if (pdfFont === 'Times-Roman') return 'Georgia, "Times New Roman", serif';
+  if (pdfFont === 'Courier') return 'Consolas, "Courier New", monospace';
+  return '"Inter Tight", Arial, sans-serif';
+}
+
 function mapFontName(fontName) {
-  if (!fontName) return 'sans-serif';
+  if (!fontName) return '"Inter Tight", Arial, sans-serif';
   const lower = fontName.toLowerCase();
   if (lower.includes('times') || lower.includes('serif') || lower.includes('roman')) {
     return 'Georgia, "Times New Roman", serif';
@@ -3741,17 +4367,28 @@ function mapFontName(fontName) {
   return '"Inter Tight", Arial, sans-serif';
 }
 
+// Click on empty edit layer to deselect
+editTextLayer.addEventListener('mousedown', e => {
+  if (e.target === editTextLayer) {
+    editTextLayer.querySelectorAll('.editable-block.selected').forEach(b => {
+      b.classList.remove('selected');
+      b.querySelectorAll('.eb-handle').forEach(h => h.remove());
+    });
+    state.selectedEditableBlock = null;
+    showEmptyInspector();
+  }
+});
+
 // Re-build the edit layer when the page changes while in edit mode
 const originalRenderPage = renderPage;
 renderPage = async function(pageNum) {
   const wasEditMode = state.editMode;
   await originalRenderPage(pageNum);
   if (wasEditMode) {
-    await buildEditableTextLayer();
+    await buildEditableLayer();
   }
 };
 
-// Re-build the edit layer on zoom while in edit mode
 const originalUpdateZoom = updateZoom;
 updateZoom = async function() {
   await originalUpdateZoom();
@@ -3867,19 +4504,18 @@ async function applyTextEditsAsOverlays() {
   // For each page, for each edited text item, add:
   //  - a white rectangle covering the original
   //  - a text element with the new text in the same position/size/font
-  for (const pageNum of Object.keys(state.pageOrder.map((_, i) => i + 1))) {} // no-op
   for (let i = 0; i < state.pageOrder.length; i++) {
     const pageInfo = state.pageOrder[i];
     const key = pageInfo.key;
     const edits = state.textEdits[key];
-    if (!edits) continue;
+    const imgEdits = state.imageEdits[key];
 
+    if (!edits && !imgEdits) continue;
     if (!state.pageEdits[key]) state.pageEdits[key] = [];
 
-    // We need page dimensions in display coords
+    // Ensure dimensions exist
     let dim = state.pageDimensions[i + 1];
     if (!dim) {
-      // Quickly compute by getting the page's viewport
       const page = await state.pdfDoc.getPage(pageInfo.origIndex + 1);
       const vp = page.getViewport({ scale: state.baseScale, rotation: pageInfo.rotation });
       dim = {
@@ -3890,58 +4526,110 @@ async function applyTextEditsAsOverlays() {
       state.pageDimensions[i + 1] = dim;
     }
 
-    Object.values(edits).forEach(te => {
-      // Coordinates are in display pixels at scale=1.5*currentZoom
-      // We need to convert them to "unscaled display units" used by overlay edits
-      const scale = state.baseScale * state.zoom;
-      const x = te.leftPx / scale;
-      const y = te.topPx / scale;
-      const fontSizeDisplay = te.fontPx / scale;
+    const scale = state.baseScale * state.zoom;
 
-      // Estimate width: original width was item.width * scale stored as minWidth
-      // We'll use the new text length to size; for the redact box use a conservative
-      // width based on font size and character count of original.
-      const origText = te.originalText || '';
-      const charWidthFactor = 0.55;
-      const origWidth = Math.max(origText.length * fontSizeDisplay * charWidthFactor, 20);
-      // For new text, account for length (but keep redact box wide enough)
-      const newText = te.newText || '';
-      const newWidth = Math.max(newText.length * fontSizeDisplay * charWidthFactor, origWidth);
+    // ==== TEXT EDITS ====
+    if (edits) {
+      Object.values(edits).forEach(te => {
+        const origLeft = te.origLeftPx;
+        const origTop = te.origTopPx;
+        const origFont = te.origFontPx;
+        const origWidth = te.origWidthPx || (te.originalText.length * origFont * 0.55);
+        const origAngle = te.origAngle || 0;
 
-      // Redact (cover original)
-      const redactPad = fontSizeDisplay * 0.15;
-      const redact = {
-        id: state.nextElementId++,
-        type: 'redact',
-        x: x - redactPad,
-        y: y - redactPad,
-        width: origWidth + redactPad * 2 + 4,
-        height: fontSizeDisplay * 1.25 + redactPad * 2,
-        color: '#ffffff',
-        [TEXT_EDIT_TAG]: true,
-      };
-      state.pageEdits[key].push(redact);
+        // Always cover the original text with a white rectangle
+        const redactPadX = origFont * 0.1;
+        const redactPadY = origFont * 0.15;
+        const redact = {
+          id: state.nextElementId++,
+          type: 'redact',
+          x: (origLeft - redactPadX) / scale,
+          y: (origTop - redactPadY) / scale,
+          width: (origWidth + redactPadX * 2 + 4) / scale,
+          height: (origFont * 1.25 + redactPadY * 2) / scale,
+          color: '#ffffff',
+          [TEXT_EDIT_TAG]: true,
+        };
+        state.pageEdits[key].push(redact);
 
-      // New text on top
-      const fontFamily = guessPdfFont(te.fontName);
-      const textEdit = {
-        id: state.nextElementId++,
-        type: 'text',
-        text: newText,
-        x: x,
-        y: y,
-        width: Math.max(newWidth + 8, 40),
-        height: fontSizeDisplay * 1.4,
-        fontSize: fontSizeDisplay,
-        fontFamily: fontFamily,
-        color: '#000000',
-        bold: false,
-        italic: false,
-        align: 'left',
-        [TEXT_EDIT_TAG]: true,
-      };
-      state.pageEdits[key].push(textEdit);
-    });
+        if (te.deleted) return; // just redact, don't add new text
+
+        // Determine new position/size/font (if user moved/resized/styled)
+        const newX = te.posX != null ? te.posX : origLeft;
+        const newY = te.posY != null ? te.posY : origTop;
+        const newFontSize = te.fontSize != null ? te.fontSize : origFont;
+        const newWidth = te.width != null ? te.width : Math.max(origWidth, te.newText.length * newFontSize * 0.55);
+        const newHeight = te.height != null ? te.height : newFontSize * 1.4;
+
+        const textEdit = {
+          id: state.nextElementId++,
+          type: 'text',
+          text: te.newText,
+          x: newX / scale,
+          y: newY / scale,
+          width: newWidth / scale,
+          height: newHeight / scale,
+          fontSize: newFontSize / scale,
+          fontFamily: te.fontFamily || guessPdfFont(te.fontName),
+          color: te.color || '#000000',
+          bold: !!te.bold,
+          italic: !!te.italic,
+          align: te.align || 'left',
+          [TEXT_EDIT_TAG]: true,
+        };
+        state.pageEdits[key].push(textEdit);
+      });
+    }
+
+    // ==== IMAGE EDITS (deletion or repositioning) ====
+    if (imgEdits) {
+      const pageImages = state.pageImages[key] || [];
+      Object.values(imgEdits).forEach(ie => {
+        const origImg = pageImages.find(im => im.id === ie.imageId);
+        if (!origImg) return;
+
+        const captureScale = origImg.captureScale;
+        const ratioToDisplay = scale / captureScale;
+        const origX = origImg.x * ratioToDisplay;
+        const origY = origImg.y * ratioToDisplay;
+        const origW = origImg.width * ratioToDisplay;
+        const origH = origImg.height * ratioToDisplay;
+
+        // Always cover the original image position with a white rectangle
+        const redact = {
+          id: state.nextElementId++,
+          type: 'redact',
+          x: origX / scale,
+          y: origY / scale,
+          width: origW / scale,
+          height: origH / scale,
+          color: '#ffffff',
+          [TEXT_EDIT_TAG]: true,
+        };
+        state.pageEdits[key].push(redact);
+
+        if (ie.deleted) return;
+
+        // Re-add image at new position
+        const newX = ie.posX != null ? ie.posX : origX;
+        const newY = ie.posY != null ? ie.posY : origY;
+        const newW = ie.width != null ? ie.width : origW;
+        const newH = ie.height != null ? ie.height : origH;
+
+        const imgEdit = {
+          id: state.nextElementId++,
+          type: 'image',
+          x: newX / scale,
+          y: newY / scale,
+          width: newW / scale,
+          height: newH / scale,
+          dataUrl: origImg.dataUrl,
+          mimeType: 'image/png',
+          [TEXT_EDIT_TAG]: true,
+        };
+        state.pageEdits[key].push(imgEdit);
+      });
+    }
   }
 }
 
